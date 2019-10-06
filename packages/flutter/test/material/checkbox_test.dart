@@ -27,7 +27,7 @@ void main() {
             child: Center(
               child: Checkbox(
                 value: true,
-                onChanged: (bool newValue) {},
+                onChanged: (bool newValue) { },
               ),
             ),
           ),
@@ -46,7 +46,7 @@ void main() {
             child: Center(
               child: Checkbox(
                 value: true,
-                onChanged: (bool newValue) {},
+                onChanged: (bool newValue) { },
               ),
             ),
           ),
@@ -192,7 +192,7 @@ void main() {
         child: Checkbox(
           tristate: true,
           value: null,
-          onChanged: (bool newValue) {},
+          onChanged: (bool newValue) { },
         ),
       ),
     );
@@ -201,7 +201,7 @@ void main() {
       flags: <SemanticsFlag>[
         SemanticsFlag.hasCheckedState,
         SemanticsFlag.hasEnabledState,
-        SemanticsFlag.isEnabled
+        SemanticsFlag.isEnabled,
       ],
       actions: <SemanticsAction>[SemanticsAction.tap],
     ), hasLength(1));
@@ -211,7 +211,7 @@ void main() {
         child: Checkbox(
           tristate: true,
           value: true,
-          onChanged: (bool newValue) {},
+          onChanged: (bool newValue) { },
         ),
       ),
     );
@@ -231,7 +231,7 @@ void main() {
         child: Checkbox(
           tristate: true,
           value: false,
-          onChanged: (bool newValue) {},
+          onChanged: (bool newValue) { },
         ),
       ),
     );
@@ -334,6 +334,46 @@ void main() {
     await tester.pumpWidget(buildFrame(null));
     await tester.pumpAndSettle();
     expect(getCheckboxRenderer(), paints..line()); // null is rendered as a line (a "dash")
+  });
+
+  testWidgets('CheckBox color rendering', (WidgetTester tester) async {
+    Widget buildFrame({Color activeColor, Color checkColor, ThemeData themeData}) {
+      return Material(
+        child: Theme(
+          data: themeData ?? ThemeData(),
+          child: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              return Checkbox(
+                value: true,
+                activeColor: activeColor,
+                checkColor: checkColor,
+                onChanged: (bool value) { },
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    RenderToggleable getCheckboxRenderer() {
+      return tester.renderObject<RenderToggleable>(find.byType(Checkbox));
+    }
+
+    await tester.pumpWidget(buildFrame(checkColor: const Color(0xFFFFFFFF)));
+    await tester.pumpAndSettle();
+    expect(getCheckboxRenderer(), paints..path(color: const Color(0xFFFFFFFF))); // paints's color is 0xFFFFFFFF (default color)
+
+    await tester.pumpWidget(buildFrame(checkColor: const Color(0xFF000000)));
+    await tester.pumpAndSettle();
+    expect(getCheckboxRenderer(), paints..path(color: const Color(0xFF000000))); // paints's color is 0xFF000000 (params)
+
+    await tester.pumpWidget(buildFrame(themeData: ThemeData(toggleableActiveColor: const Color(0xFF00FF00))));
+    await tester.pumpAndSettle();
+    expect(getCheckboxRenderer(), paints..rrect(color: const Color(0xFF00FF00))); // paints's color is 0xFF00FF00 (theme)
+
+    await tester.pumpWidget(buildFrame(activeColor: const Color(0xFF000000)));
+    await tester.pumpAndSettle();
+    expect(getCheckboxRenderer(), paints..rrect(color: const Color(0xFF000000))); // paints's color is 0xFF000000 (params)
   });
 
 }

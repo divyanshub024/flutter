@@ -57,15 +57,18 @@ class AnalyzeOnce extends AnalyzeBase {
       final PackageDependencyTracker dependencies = PackageDependencyTracker();
       dependencies.checkForConflictingDependencies(repoPackages, dependencies);
       directories.addAll(repoRoots);
-      if (argResults.wasParsed('current-package') && argResults['current-package'])
+      if (argResults.wasParsed('current-package') && argResults['current-package']) {
         directories.add(currentDirectory);
+      }
     } else {
-      if (argResults['current-package'])
+      if (argResults['current-package']) {
         directories.add(currentDirectory);
+      }
     }
 
-    if (directories.isEmpty)
+    if (directories.isEmpty) {
       throwToolExit('Nothing to analyze.', exitCode: 0);
+    }
 
     // analyze all
     final Completer<void> analysisCompleter = Completer<void>();
@@ -93,11 +96,11 @@ class AnalyzeOnce extends AnalyzeBase {
 
     await server.start();
     // Completing the future in the callback can't fail.
-    server.onExit.then<void>((int exitCode) { // ignore: unawaited_futures
+    unawaited(server.onExit.then<void>((int exitCode) {
       if (!analysisCompleter.isCompleted) {
         analysisCompleter.completeError('analysis server exited: $exitCode');
       }
-    });
+    }));
 
     Cache.releaseLockEarly();
 
@@ -107,7 +110,7 @@ class AnalyzeOnce extends AnalyzeBase {
         ? '${directories.length} ${directories.length == 1 ? 'directory' : 'directories'}'
         : fs.path.basename(directories.first);
     final Status progress = argResults['preamble']
-        ? logger.startProgress('Analyzing $message...', timeout: kSlowOperation)
+        ? logger.startProgress('Analyzing $message...', timeout: timeoutConfiguration.slowOperation)
         : null;
 
     await analysisCompleter.future;
@@ -118,22 +121,26 @@ class AnalyzeOnce extends AnalyzeBase {
     final int undocumentedMembers = errors.where((AnalysisError error) {
       return error.code == 'public_member_api_docs';
     }).length;
-    if (!argResults['dartdocs'])
+    if (!argResults['dartdocs']) {
       errors.removeWhere((AnalysisError error) => error.code == 'public_member_api_docs');
+    }
 
     // emit benchmarks
-    if (isBenchmarking)
+    if (isBenchmarking) {
       writeBenchmark(timer, errors.length, undocumentedMembers);
+    }
 
     // --write
     dumpErrors(errors.map<String>((AnalysisError error) => error.toLegacyString()));
 
     // report errors
-    if (errors.isNotEmpty && argResults['preamble'])
+    if (errors.isNotEmpty && argResults['preamble']) {
       printStatus('');
+    }
     errors.sort();
-    for (AnalysisError error in errors)
+    for (AnalysisError error in errors) {
       printStatus(error.toString(), hangingIndent: 7);
+    }
 
     final String seconds = (timer.elapsedMilliseconds / 1000.0).toStringAsFixed(1);
 
@@ -153,6 +160,10 @@ class AnalyzeOnce extends AnalyzeBase {
       } else {
         throwToolExit('$errorCount ${pluralize('issue', errorCount)} found. (ran in ${seconds}s)');
       }
+    }
+
+    if (server.didServerErrorOccur) {
+      throwToolExit('Server error(s) occurred. (ran in ${seconds}s)');
     }
 
     if (argResults['congratulate']) {

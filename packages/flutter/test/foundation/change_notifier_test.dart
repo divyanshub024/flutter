@@ -1,4 +1,4 @@
- // Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,10 @@ void main() {
     final VoidCallback listener = () { log.add('listener'); };
     final VoidCallback listener1 = () { log.add('listener1'); };
     final VoidCallback listener2 = () { log.add('listener2'); };
-    final VoidCallback badListener = () { log.add('badListener'); throw null; };
+    final VoidCallback badListener = () {
+      log.add('badListener');
+      throw null;
+    };
 
     final TestNotifier test = TestNotifier();
 
@@ -102,7 +105,7 @@ void main() {
     expect(log, <String>['badListener', 'listener1', 'listener2']);
     expect(tester.takeException(), isNullThrownError);
     log.clear();
-  });
+  }, skip: isBrowser);
 
   test('ChangeNotifier with mutating listener', () {
     final TestNotifier test = TestNotifier();
@@ -261,7 +264,7 @@ void main() {
 
     final TestNotifier source1 = TestNotifier();
     final TestNotifier source2 = TestNotifier();
-    final VoidCallback fakeListener = () {};
+    final VoidCallback fakeListener = () { };
 
     final Listenable listenableUnderTest = Listenable.merge(<Listenable>[source1, source2]);
     expect(source1.isListenedTo, isFalse);

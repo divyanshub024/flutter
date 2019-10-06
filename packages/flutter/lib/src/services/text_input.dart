@@ -4,9 +4,17 @@
 
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:ui' show TextAffinity, hashValues, Offset;
+import 'dart:ui' show
+  FontWeight,
+  Offset,
+  Size,
+  TextAffinity,
+  TextAlign,
+  TextDirection,
+  hashValues;
 
 import 'package:flutter/foundation.dart';
+import 'package:vector_math/vector_math_64.dart' show Matrix4;
 
 import 'message_codec.dart';
 import 'system_channels.dart';
@@ -14,6 +22,9 @@ import 'system_chrome.dart';
 import 'text_editing.dart';
 
 export 'dart:ui' show TextAffinity;
+
+// Whether we're compiled to JavaScript in a web browser.
+const bool _kIsBrowser = identical(0, 0.0);
 
 /// The type of information for which to optimize the text input control.
 ///
@@ -23,7 +34,9 @@ export 'dart:ui' show TextAffinity;
 /// for additional flags for some input types. For example, numeric input
 /// can specify whether it supports decimal numbers and/or signed numbers.
 class TextInputType {
-  const TextInputType._(this.index) : signed = null, decimal = null;
+  const TextInputType._(this.index)
+    : signed = null,
+      decimal = null;
 
   /// Optimize for numerical information.
   ///
@@ -91,14 +104,19 @@ class TextInputType {
   /// Requests a keyboard with ready access to the "/" and "." keys.
   static const TextInputType url = TextInputType._(6);
 
+  /// Optimize for passwords that are visible to the user.
+  ///
+  /// Requests a keyboard with ready access to both letters and numbers.
+  static const TextInputType visiblePassword = TextInputType._(7);
+
   /// All possible enum values.
   static const List<TextInputType> values = <TextInputType>[
-    text, multiline, number, phone, datetime, emailAddress, url,
+    text, multiline, number, phone, datetime, emailAddress, url, visiblePassword,
   ];
 
   // Corresponding string name for each of the [values].
   static const List<String> _names = <String>[
-    'text', 'multiline', 'number', 'phone', 'datetime', 'emailAddress', 'url',
+    'text', 'multiline', 'number', 'phone', 'datetime', 'emailAddress', 'url', 'visiblePassword',
   ];
 
   // Enum value name, this is what enum.toString() would normally return.
@@ -387,7 +405,7 @@ class TextInputConfiguration {
   /// Defaults to false.
   final bool obscureText;
 
-  /// Whether to enable autocorrection.
+  /// Whether to enable auto-correction.
   ///
   /// Defaults to true.
   final bool autocorrect;
@@ -398,7 +416,7 @@ class TextInputConfiguration {
   /// What kind of action to request for the action button on the IME.
   final TextInputAction inputAction;
 
-  /// Specifies how platforms may automatically capitialize text entered by the
+  /// Specifies how platforms may automatically capitalize text entered by the
   /// user.
   ///
   /// Defaults to [TextCapitalization.none].
@@ -464,7 +482,7 @@ class RawFloatingCursorPoint {
     this.offset,
     @required this.state,
   }) : assert(state != null),
-       assert(state == FloatingCursorDragState.Update ? offset != null : true);
+       assert(state != FloatingCursorDragState.Update || offset != null);
 
   /// The raw position of the floating cursor as determined by the iOS sdk.
   final Offset offset;
@@ -485,7 +503,7 @@ class TextEditingValue {
   const TextEditingValue({
     this.text = '',
     this.selection = const TextSelection.collapsed(offset: -1),
-    this.composing = TextRange.empty
+    this.composing = TextRange.empty,
   }) : assert(text != null),
        assert(selection != null),
        assert(composing != null);
@@ -536,12 +554,12 @@ class TextEditingValue {
   TextEditingValue copyWith({
     String text,
     TextSelection selection,
-    TextRange composing
+    TextRange composing,
   }) {
     return TextEditingValue(
       text: text ?? this.text,
       selection: selection ?? this.selection,
-      composing: composing ?? this.composing
+      composing: composing ?? this.composing,
     );
   }
 
@@ -564,7 +582,7 @@ class TextEditingValue {
   int get hashCode => hashValues(
     text.hashCode,
     selection.hashCode,
-    composing.hashCode
+    composing.hashCode,
   );
 }
 
@@ -583,6 +601,18 @@ abstract class TextSelectionDelegate {
   /// Brings the provided [TextPosition] into the visible area of the text
   /// input.
   void bringIntoView(TextPosition position);
+
+  /// Whether cut is enabled, must not be null.
+  bool get cutEnabled => true;
+
+  /// Whether copy is enabled, must not be null.
+  bool get copyEnabled => true;
+
+  /// Whether paste is enabled, must not be null.
+  bool get pasteEnabled => true;
+
+  /// Whether select all is enabled, must not be null.
+  bool get selectAllEnabled => true;
 }
 
 /// An interface to receive information from [TextInput].
@@ -612,8 +642,11 @@ abstract class TextInputClient {
 ///  * [TextInput.attach]
 class TextInputConnection {
   TextInputConnection._(this._client)
-    : assert(_client != null),
-      _id = _nextId++;
+      : assert(_client != null),
+        _id = _nextId++;
+
+  Size _cachedSize;
+  Matrix4 _cachedTransform;
 
   static int _nextId = 1;
   final int _id;
@@ -635,6 +668,56 @@ class TextInputConnection {
     SystemChannels.textInput.invokeMethod<void>(
       'TextInput.setEditingState',
       value.toJSON(),
+    );
+  }
+
+  /// Send the size and transform of the editable text to engine.
+  ///
+  /// The values are sent as platform messages so they can be used on web for
+  /// example to correctly position and size the html input field.
+  ///
+  /// 1. [editableBoxSize]: size of the render editable box.
+  ///
+  /// 2. [transform]: a matrix that maps the local paint coordinate system
+  ///                 to the [PipelineOwner.rootNode].
+  void setEditableSizeAndTransform(Size editableBoxSize, Matrix4 transform) {
+    if (editableBoxSize != _cachedSize || transform != _cachedTransform) {
+      _cachedSize = editableBoxSize;
+      _cachedTransform = transform;
+      SystemChannels.textInput.invokeMethod<void>(
+        'TextInput.setEditableSizeAndTransform',
+        <String, dynamic>{
+          'width': editableBoxSize.width,
+          'height': editableBoxSize.height,
+          'transform': transform.storage,
+        },
+      );
+    }
+  }
+
+  /// Send text styling information.
+  ///
+  /// This information is used by the Flutter Web Engine to change the style
+  /// of the hidden native input's content. Hence, the content size will match
+  /// to the size of the editable widget's content.
+  void setStyle({
+    @required String fontFamily,
+    @required double fontSize,
+    @required FontWeight fontWeight,
+    @required TextDirection textDirection,
+    @required TextAlign textAlign,
+  }) {
+    assert(attached);
+
+    SystemChannels.textInput.invokeMethod<void>(
+      'TextInput.setStyle',
+      <String, dynamic>{
+        'fontFamily': fontFamily,
+        'fontSize': fontSize,
+        'fontWeightIndex': fontWeight?.index,
+        'textAlignIndex': textAlign.index,
+        'textDirectionIndex': textDirection.index,
+      },
     );
   }
 
@@ -811,6 +894,10 @@ class TextInput {
 
   static bool _debugEnsureInputActionWorksOnPlatform(TextInputAction inputAction) {
     assert(() {
+      if (_kIsBrowser) {
+        // TODO(flutterweb): what makes sense here?
+        return true;
+      }
       if (Platform.isIOS) {
         assert(
           _iOSSupportedInputActions.contains(inputAction),

@@ -31,7 +31,7 @@ class TestServiceExtensionsBinding extends BindingBase
   @override
   void registerServiceExtension({
     @required String name,
-    @required ServiceExtensionCallback callback
+    @required ServiceExtensionCallback callback,
   }) {
     expect(extensions.containsKey(name), isFalse);
     extensions[name] = callback;
@@ -68,6 +68,7 @@ class TestServiceExtensionsBinding extends BindingBase
   bool frameScheduled = false;
   @override
   void scheduleFrame() {
+    ensureFrameCallbacksRegistered();
     frameScheduled = true;
   }
   Future<void> doFrame() async {
@@ -77,6 +78,12 @@ class TestServiceExtensionsBinding extends BindingBase
     await flushMicrotasks();
     if (ui.window.onDrawFrame != null)
       ui.window.onDrawFrame();
+    // use frameTimings. https://github.com/flutter/flutter/issues/38838
+    // ignore: deprecated_member_use
+    if (ui.window.onReportTimings != null)
+      // use frameTimings. https://github.com/flutter/flutter/issues/38838
+      // ignore: deprecated_member_use
+      ui.window.onReportTimings(<ui.FrameTiming>[]);
   }
 
   @override
@@ -117,8 +124,8 @@ Future<Map<String, dynamic>> hasReassemble(Future<Map<String, dynamic>> pendingR
 void main() {
   final List<String> console = <String>[];
 
-  test('Service extensions - pretest', () async {
-    binding = TestServiceExtensionsBinding();
+  setUpAll(() async {
+    binding = TestServiceExtensionsBinding()..scheduleFrame();
     expect(binding.frameScheduled, isTrue);
 
     // We need to test this service extension here because the result is true
@@ -126,13 +133,21 @@ void main() {
     Map<String, dynamic> firstFrameResult;
     expect(binding.debugDidSendFirstFrameEvent, isFalse);
     firstFrameResult = await binding.testExtension('didSendFirstFrameEvent', <String, String>{});
-    expect(firstFrameResult, <String, String>{ 'enabled': 'false' });
+    expect(firstFrameResult, <String, String>{'enabled': 'false'});
 
-    await binding.doFrame(); // initial frame scheduled by creating the binding
+    expect(binding.firstFrameRasterized, isFalse);
+    firstFrameResult = await binding.testExtension('didSendFirstFrameRasterizedEvent', <String, String>{});
+    expect(firstFrameResult, <String, String>{'enabled': 'false'});
+
+    await binding.doFrame();
 
     expect(binding.debugDidSendFirstFrameEvent, isTrue);
     firstFrameResult = await binding.testExtension('didSendFirstFrameEvent', <String, String>{});
-    expect(firstFrameResult, <String, String>{ 'enabled': 'true' });
+    expect(firstFrameResult, <String, String>{'enabled': 'true'});
+
+    expect(binding.firstFrameRasterized, isTrue);
+    firstFrameResult = await binding.testExtension('didSendFirstFrameRasterizedEvent', <String, String>{});
+    expect(firstFrameResult, <String, String>{'enabled': 'true'});
 
     expect(binding.frameScheduled, isFalse);
 
@@ -142,10 +157,30 @@ void main() {
     };
   });
 
+  tearDownAll(() async {
+    // See widget_inspector_test.dart for tests of the ext.flutter.inspector
+    // service extensions included in this count.
+    int widgetInspectorExtensionCount = 16;
+    if (WidgetInspectorService.instance.isWidgetCreationTracked()) {
+      // Some inspector extensions are only exposed if widget creation locations
+      // are tracked.
+      widgetInspectorExtensionCount += 2;
+    }
+
+    // The following service extensions are disabled in web:
+    // 1. exit
+    // 2. saveCompilationTrace
+    // 3. showPerformanceOverlay
+    const int disabledExtensions = kIsWeb ? 3 : 0;
+    // If you add a service extension... TEST IT! :-)
+    // ...then increment this number.
+    expect(binding.extensions.length, 27 + widgetInspectorExtensionCount - disabledExtensions);
+
+    expect(console, isEmpty);
+    debugPrint = debugPrintThrottled;
+  });
+
   // The following list is alphabetical, one test per extension.
-  //
-  // The order doesn't really matter except that the pretest and posttest tests
-  // must be first and last respectively.
 
   test('Service extensions - debugAllowBanner', () async {
     Map<String, dynamic> result;
@@ -153,20 +188,48 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(WidgetsApp.debugAllowBannerOverride, true);
     result = await binding.testExtension('debugAllowBanner', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.debugAllowBannerOverride, true);
-    result = await binding.testExtension('debugAllowBanner', <String, String>{ 'enabled': 'false' });
-    expect(result, <String, String>{ 'enabled': 'false' });
+    result = await binding.testExtension('debugAllowBanner', <String, String>{'enabled': 'false'});
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.debugAllowBannerOverride, false);
     result = await binding.testExtension('debugAllowBanner', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.debugAllowBannerOverride, false);
-    result = await binding.testExtension('debugAllowBanner', <String, String>{ 'enabled': 'true' });
-    expect(result, <String, String>{ 'enabled': 'true' });
+    result = await binding.testExtension('debugAllowBanner', <String, String>{'enabled': 'true'});
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.debugAllowBannerOverride, true);
     result = await binding.testExtension('debugAllowBanner', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.debugAllowBannerOverride, true);
+    expect(binding.frameScheduled, isFalse);
+  });
+
+  test('Service extensions - debugCheckElevationsEnabled', () async {
+    expect(binding.frameScheduled, isFalse);
+    expect(debugCheckElevationsEnabled, false);
+
+    bool lastValue = false;
+    Future<void> _updateAndCheck(bool newValue) async {
+      Map<String, dynamic> result;
+      binding.testExtension(
+        'debugCheckElevationsEnabled',
+        <String, String>{'enabled': '$newValue'},
+      ).then((Map<String, dynamic> answer) => result = answer);
+      await binding.flushMicrotasks();
+      expect(binding.frameScheduled, lastValue != newValue);
+      await binding.doFrame();
+      await binding.flushMicrotasks();
+      expect(result, <String, String>{'enabled': '$newValue'});
+      expect(debugCheckElevationsEnabled, newValue);
+      lastValue = newValue;
+    }
+
+    await _updateAndCheck(false);
+    await _updateAndCheck(true);
+    await _updateAndCheck(true);
+    await _updateAndCheck(false);
+    await _updateAndCheck(false);
     expect(binding.frameScheduled, isFalse);
   });
 
@@ -253,11 +316,11 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(debugPaintSizeEnabled, false);
     result = await binding.testExtension('debugPaint', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintSizeEnabled, false);
     expect(extensionChangedEvents, isEmpty);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('debugPaint', <String, String>{ 'enabled': 'true' });
+    pendingResult = binding.testExtension('debugPaint', <String, String>{'enabled': 'true'});
     completed = false;
     pendingResult.whenComplete(() { completed = true; });
     await binding.flushMicrotasks();
@@ -268,31 +331,31 @@ void main() {
     expect(completed, isTrue);
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugPaintSizeEnabled, true);
     expect(extensionChangedEvents.length, 1);
     extensionChangedEvent = extensionChangedEvents.last;
     expect(extensionChangedEvent['extension'], 'ext.flutter.debugPaint');
     expect(extensionChangedEvent['value'], 'true');
     result = await binding.testExtension('debugPaint', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugPaintSizeEnabled, true);
     expect(extensionChangedEvents.length, 1);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('debugPaint', <String, String>{ 'enabled': 'false' });
+    pendingResult = binding.testExtension('debugPaint', <String, String>{'enabled': 'false'});
     await binding.flushMicrotasks();
     expect(binding.frameScheduled, isTrue);
     await binding.doFrame();
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintSizeEnabled, false);
     expect(extensionChangedEvents.length, 2);
     extensionChangedEvent = extensionChangedEvents.last;
     expect(extensionChangedEvent['extension'], 'ext.flutter.debugPaint');
     expect(extensionChangedEvent['value'], 'false');
     result = await binding.testExtension('debugPaint', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintSizeEnabled, false);
     expect(extensionChangedEvents.length, 2);
     expect(binding.frameScheduled, isFalse);
@@ -306,10 +369,10 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(debugPaintBaselinesEnabled, false);
     result = await binding.testExtension('debugPaintBaselinesEnabled', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintBaselinesEnabled, false);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('debugPaintBaselinesEnabled', <String, String>{ 'enabled': 'true' });
+    pendingResult = binding.testExtension('debugPaintBaselinesEnabled', <String, String>{'enabled': 'true'});
     completed = false;
     pendingResult.whenComplete(() { completed = true; });
     await binding.flushMicrotasks();
@@ -320,22 +383,22 @@ void main() {
     expect(completed, isTrue);
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugPaintBaselinesEnabled, true);
     result = await binding.testExtension('debugPaintBaselinesEnabled', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugPaintBaselinesEnabled, true);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('debugPaintBaselinesEnabled', <String, String>{ 'enabled': 'false' });
+    pendingResult = binding.testExtension('debugPaintBaselinesEnabled', <String, String>{'enabled': 'false'});
     await binding.flushMicrotasks();
     expect(binding.frameScheduled, isTrue);
     await binding.doFrame();
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintBaselinesEnabled, false);
     result = await binding.testExtension('debugPaintBaselinesEnabled', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugPaintBaselinesEnabled, false);
     expect(binding.frameScheduled, isFalse);
   });
@@ -347,23 +410,23 @@ void main() {
     expect(debugProfileBuildsEnabled, false);
 
     result = await binding.testExtension('profileWidgetBuilds', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugProfileBuildsEnabled, false);
 
-    result = await binding.testExtension('profileWidgetBuilds', <String, String>{ 'enabled': 'true' });
-    expect(result, <String, String>{ 'enabled': 'true' });
+    result = await binding.testExtension('profileWidgetBuilds', <String, String>{'enabled': 'true'});
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugProfileBuildsEnabled, true);
 
     result = await binding.testExtension('profileWidgetBuilds', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugProfileBuildsEnabled, true);
 
-    result = await binding.testExtension('profileWidgetBuilds', <String, String>{ 'enabled': 'false' });
-    expect(result, <String, String>{ 'enabled': 'false' });
+    result = await binding.testExtension('profileWidgetBuilds', <String, String>{'enabled': 'false'});
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugProfileBuildsEnabled, false);
 
     result = await binding.testExtension('profileWidgetBuilds', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugProfileBuildsEnabled, false);
 
     expect(binding.frameScheduled, isFalse);
@@ -374,31 +437,41 @@ void main() {
     bool completed;
 
     completed = false;
-    BinaryMessages.setMockMessageHandler('flutter/assets', (ByteData message) async {
+    ServicesBinding.instance.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (ByteData message) async {
       expect(utf8.decode(message.buffer.asUint8List()), 'test');
       completed = true;
       return ByteData(5); // 0x0000000000
     });
     bool data;
-    data = await rootBundle.loadStructuredData<bool>('test', (String value) async { expect(value, '\x00\x00\x00\x00\x00'); return true; });
+    data = await rootBundle.loadStructuredData<bool>('test', (String value) async {
+      expect(value, '\x00\x00\x00\x00\x00');
+      return true;
+    });
     expect(data, isTrue);
     expect(completed, isTrue);
     completed = false;
-    data = await rootBundle.loadStructuredData('test', (String value) async { expect(true, isFalse); return null; });
+    data = await rootBundle.loadStructuredData('test', (String value) async {
+      expect(true, isFalse);
+      return null;
+    });
     expect(data, isTrue);
     expect(completed, isFalse);
-    result = await binding.testExtension('evict', <String, String>{ 'value': 'test' });
-    expect(result, <String, String>{ 'value': '' });
+    result = await binding.testExtension('evict', <String, String>{'value': 'test'});
+    expect(result, <String, String>{'value': ''});
     expect(completed, isFalse);
-    data = await rootBundle.loadStructuredData<bool>('test', (String value) async { expect(value, '\x00\x00\x00\x00\x00'); return false; });
+    data = await rootBundle.loadStructuredData<bool>('test', (String value) async {
+      expect(value, '\x00\x00\x00\x00\x00');
+      return false;
+    });
     expect(data, isFalse);
     expect(completed, isTrue);
-    BinaryMessages.setMockMessageHandler('flutter/assets', null);
+    ServicesBinding.instance.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', null);
   });
 
   test('Service extensions - exit', () async {
     // no test for _calling_ 'exit', because that should terminate the process!
-    expect(binding.extensions.containsKey('exit'), isTrue);
+    // Not expecting extension to be available for web platform.
+    expect(binding.extensions.containsKey('exit'), !isBrowser);
   });
 
   test('Service extensions - platformOverride', () async {
@@ -471,23 +544,23 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(debugRepaintRainbowEnabled, false);
     result = await binding.testExtension('repaintRainbow', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugRepaintRainbowEnabled, false);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('repaintRainbow', <String, String>{ 'enabled': 'true' });
+    pendingResult = binding.testExtension('repaintRainbow', <String, String>{'enabled': 'true'});
     completed = false;
     pendingResult.whenComplete(() { completed = true; });
     await binding.flushMicrotasks();
     expect(completed, true);
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugRepaintRainbowEnabled, true);
     result = await binding.testExtension('repaintRainbow', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(debugRepaintRainbowEnabled, true);
     expect(binding.frameScheduled, isFalse);
-    pendingResult = binding.testExtension('repaintRainbow', <String, String>{ 'enabled': 'false' });
+    pendingResult = binding.testExtension('repaintRainbow', <String, String>{'enabled': 'false'});
     completed = false;
     pendingResult.whenComplete(() { completed = true; });
     await binding.flushMicrotasks();
@@ -498,10 +571,10 @@ void main() {
     expect(completed, true);
     expect(binding.frameScheduled, isFalse);
     result = await pendingResult;
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugRepaintRainbowEnabled, false);
     result = await binding.testExtension('repaintRainbow', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(debugRepaintRainbowEnabled, false);
     expect(binding.frameScheduled, isFalse);
   });
@@ -531,22 +604,28 @@ void main() {
   test('Service extensions - showPerformanceOverlay', () async {
     Map<String, dynamic> result;
 
+    // The performance overlay service extension is disabled on the web.
+    if (kIsWeb) {
+      expect(binding.extensions.containsKey('showPerformanceOverlay'), isFalse);
+      return;
+    }
+
     expect(binding.frameScheduled, isFalse);
     expect(WidgetsApp.showPerformanceOverlayOverride, false);
     result = await binding.testExtension('showPerformanceOverlay', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.showPerformanceOverlayOverride, false);
-    result = await binding.testExtension('showPerformanceOverlay', <String, String>{ 'enabled': 'true' });
-    expect(result, <String, String>{ 'enabled': 'true' });
+    result = await binding.testExtension('showPerformanceOverlay', <String, String>{'enabled': 'true'});
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.showPerformanceOverlayOverride, true);
     result = await binding.testExtension('showPerformanceOverlay', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.showPerformanceOverlayOverride, true);
-    result = await binding.testExtension('showPerformanceOverlay', <String, String>{ 'enabled': 'false' });
-    expect(result, <String, String>{ 'enabled': 'false' });
+    result = await binding.testExtension('showPerformanceOverlay', <String, String>{'enabled': 'false'});
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.showPerformanceOverlayOverride, false);
     result = await binding.testExtension('showPerformanceOverlay', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.showPerformanceOverlayOverride, false);
     expect(binding.frameScheduled, isFalse);
   });
@@ -556,19 +635,19 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(WidgetsApp.debugShowWidgetInspectorOverride, false);
     result = await binding.testExtension('debugWidgetInspector', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.debugShowWidgetInspectorOverride, false);
-    result = await binding.testExtension('debugWidgetInspector', <String, String>{ 'enabled': 'true' });
-    expect(result, <String, String>{ 'enabled': 'true' });
+    result = await binding.testExtension('debugWidgetInspector', <String, String>{'enabled': 'true'});
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.debugShowWidgetInspectorOverride, true);
     result = await binding.testExtension('debugWidgetInspector', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'true' });
+    expect(result, <String, String>{'enabled': 'true'});
     expect(WidgetsApp.debugShowWidgetInspectorOverride, true);
-    result = await binding.testExtension('debugWidgetInspector', <String, String>{ 'enabled': 'false' });
-    expect(result, <String, String>{ 'enabled': 'false' });
+    result = await binding.testExtension('debugWidgetInspector', <String, String>{'enabled': 'false'});
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.debugShowWidgetInspectorOverride, false);
     result = await binding.testExtension('debugWidgetInspector', <String, String>{});
-    expect(result, <String, String>{ 'enabled': 'false' });
+    expect(result, <String, String>{'enabled': 'false'});
     expect(WidgetsApp.debugShowWidgetInspectorOverride, false);
     expect(binding.frameScheduled, isFalse);
   });
@@ -581,29 +660,29 @@ void main() {
     expect(binding.frameScheduled, isFalse);
     expect(timeDilation, 1.0);
     result = await binding.testExtension('timeDilation', <String, String>{});
-    expect(result, <String, String>{ 'timeDilation': '1.0' });
+    expect(result, <String, String>{'timeDilation': 1.0.toString()});
     expect(timeDilation, 1.0);
     expect(extensionChangedEvents, isEmpty);
-    result = await binding.testExtension('timeDilation', <String, String>{ 'timeDilation': '100.0' });
-    expect(result, <String, String>{ 'timeDilation': '100.0' });
+    result = await binding.testExtension('timeDilation', <String, String>{'timeDilation': '100.0'});
+    expect(result, <String, String>{'timeDilation': 100.0.toString()});
     expect(timeDilation, 100.0);
     expect(extensionChangedEvents.length, 1);
     extensionChangedEvent = extensionChangedEvents.last;
     expect(extensionChangedEvent['extension'], 'ext.flutter.timeDilation');
-    expect(extensionChangedEvent['value'], '100.0');
+    expect(extensionChangedEvent['value'], 100.0.toString());
     result = await binding.testExtension('timeDilation', <String, String>{});
-    expect(result, <String, String>{ 'timeDilation': '100.0' });
+    expect(result, <String, String>{'timeDilation': 100.0.toString()});
     expect(timeDilation, 100.0);
     expect(extensionChangedEvents.length, 1);
-    result = await binding.testExtension('timeDilation', <String, String>{ 'timeDilation': '1.0' });
-    expect(result, <String, String>{ 'timeDilation': '1.0' });
+    result = await binding.testExtension('timeDilation', <String, String>{'timeDilation': '1.0'});
+    expect(result, <String, String>{'timeDilation': 1.0.toString()});
     expect(timeDilation, 1.0);
     expect(extensionChangedEvents.length, 2);
     extensionChangedEvent = extensionChangedEvents.last;
     expect(extensionChangedEvent['extension'], 'ext.flutter.timeDilation');
-    expect(extensionChangedEvent['value'], '1.0');
+    expect(extensionChangedEvent['value'], 1.0.toString());
     result = await binding.testExtension('timeDilation', <String, String>{});
-    expect(result, <String, String>{ 'timeDilation': '1.0' });
+    expect(result, <String, String>{'timeDilation': 1.0.toString()});
     expect(timeDilation, 1.0);
     expect(extensionChangedEvents.length, 2);
     expect(binding.frameScheduled, isFalse);
@@ -616,23 +695,5 @@ void main() {
     expect(trace, contains('dart:core,Object,Object.\n'));
     expect(trace, contains('package:test_api/test_api.dart,::,test\n'));
     expect(trace, contains('service_extensions_test.dart,::,main\n'));
-  });
-
-  test('Service extensions - posttest', () async {
-    // See widget_inspector_test.dart for tests of the ext.flutter.inspector
-    // service extensions included in this count.
-    int widgetInspectorExtensionCount = 15;
-    if (WidgetInspectorService.instance.isWidgetCreationTracked()) {
-      // Some inspector extensions are only exposed if widget creation locations
-      // are tracked.
-      widgetInspectorExtensionCount += 2;
-    }
-
-    // If you add a service extension... TEST IT! :-)
-    // ...then increment this number.
-    expect(binding.extensions.length, 25 + widgetInspectorExtensionCount);
-
-    expect(console, isEmpty);
-    debugPrint = debugPrintThrottled;
-  });
+  }, skip: isBrowser);
 }

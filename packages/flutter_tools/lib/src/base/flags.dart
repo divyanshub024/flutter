@@ -8,7 +8,7 @@ import 'context.dart';
 
 /// command-line flags and options that were specified during the invocation of
 /// the Flutter tool.
-Flags get flags => context[Flags];
+Flags get flags => context.get<Flags>();
 
 /// Encapsulation of the command-line flags and options that were specified
 /// during the invocation of the Flutter tool.
@@ -36,10 +36,11 @@ class Flags {
   dynamic operator [](String key) {
     final ArgResults commandResults = _globalResults.command;
     final Iterable<String> options = commandResults?.options;
-    if (options != null && options.contains(key))
+    if (options != null && options.contains(key)) {
       return commandResults[key];
-    else if (_globalResults.options.contains(key))
+    } else if (_globalResults.options.contains(key)) {
       return _globalResults[key];
+    }
     return null;
   }
 

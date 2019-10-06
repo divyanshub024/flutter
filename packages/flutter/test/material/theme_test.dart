@@ -31,14 +31,14 @@ void main() {
                 key: popupMenuButtonKey,
                 itemBuilder: (BuildContext context) {
                   return <PopupMenuItem<String>>[
-                    const PopupMenuItem<String>(child: Text('menuItem'))
+                    const PopupMenuItem<String>(child: Text('menuItem')),
                   ];
-                }
+                },
               ),
-            ]
-          )
-        )
-      )
+            ],
+          ),
+        ),
+      ),
     );
 
     await tester.tap(find.byKey(popupMenuButtonKey));
@@ -100,15 +100,15 @@ void main() {
                   key: popupMenuButtonKey,
                   itemBuilder: (BuildContext context) {
                     return <PopupMenuItem<String>>[
-                      const PopupMenuItem<String>(child: Text('menuItem'))
+                      const PopupMenuItem<String>(child: Text('menuItem')),
                     ];
-                  }
+                  },
                 ),
-              ]
-            )
-          )
-        )
-      )
+              ],
+            ),
+          ),
+        ),
+      ),
     );
 
     await tester.tap(find.byKey(popupMenuButtonKey));
@@ -137,12 +137,12 @@ void main() {
                       child: Text('menuItem'),
                     ),
                   ],
-                )
-              ]
-            )
-          )
-        )
-      )
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
 
     await tester.tap(find.byKey(dropdownMenuButtonKey));
@@ -172,11 +172,11 @@ void main() {
                     child: const Text('SHOW'),
                   );
                 }
-              )
-            )
-          )
-        )
-      )
+              ),
+            ),
+          ),
+        ),
+      ),
     );
 
     await tester.tap(find.text('SHOW'));
@@ -209,11 +209,11 @@ void main() {
                     child: const Text('SHOW'),
                   );
                 }
-              )
-            )
-          )
-        )
-      )
+              ),
+            ),
+          ),
+        ),
+      ),
     );
 
     await tester.tap(find.text('SHOW'));
@@ -251,7 +251,7 @@ void main() {
             ),
           ),
         ),
-      )
+      ),
     );
 
     await tester.tap(find.text('SHOW'));
@@ -268,7 +268,7 @@ void main() {
       MaterialApp(
         theme: ThemeData(iconTheme: const IconThemeData(color: Colors.green, size: 10.0)),
         home: const Icon(Icons.computer),
-      )
+      ),
     );
 
     RenderParagraph glyphText = tester.renderObject(find.byType(RichText));
@@ -338,7 +338,7 @@ void main() {
       primaryTextTheme: fallback.primaryTextTheme.copyWith(
         body1: fallback.primaryTextTheme.body1.copyWith(
           fontSize: _kMagicFontSize,
-        )
+        ),
       ),
     );
     expect(customTheme.primaryTextTheme.body1.fontSize, _kMagicFontSize);
@@ -417,28 +417,26 @@ void main() {
   group('Cupertino theme', () {
     int buildCount;
     CupertinoThemeData actualTheme;
+    IconThemeData actualIconTheme;
 
     final Widget singletonThemeSubtree = Builder(
       builder: (BuildContext context) {
         buildCount++;
         actualTheme = CupertinoTheme.of(context);
+        actualIconTheme = IconTheme.of(context);
         return const Placeholder();
       },
     );
 
     Future<CupertinoThemeData> testTheme(WidgetTester tester, ThemeData theme) async {
-      await tester.pumpWidget(
-        Theme(
-          data: theme,
-          child: singletonThemeSubtree,
-        ),
-      );
+      await tester.pumpWidget(Theme(data: theme, child: singletonThemeSubtree));
       return actualTheme;
     }
 
     setUp(() {
       buildCount = 0;
       actualTheme = null;
+      actualIconTheme = null;
     });
 
     testWidgets('Default theme has defaults', (WidgetTester tester) async {
@@ -507,6 +505,20 @@ void main() {
 
       expect(buildCount, 2);
       expect(theme.primaryColor, Colors.orange);
+    });
+
+    testWidgets("CupertinoThemeData does not override material theme's icon theme",
+      (WidgetTester tester) async {
+        const Color materialIconColor = Colors.blue;
+        const Color cupertinoIconColor = Colors.black;
+
+        await testTheme(tester, ThemeData(
+            iconTheme: const IconThemeData(color: materialIconColor),
+            cupertinoOverrideTheme: const CupertinoThemeData(primaryColor: cupertinoIconColor),
+        ));
+
+        expect(buildCount, 1);
+        expect(actualIconTheme.color, materialIconColor);
     });
 
     testWidgets(
@@ -665,32 +677,57 @@ class _TextStyleProxy implements TextStyle {
   final TextStyle _delegate;
 
   // Do make sure that all the properties correctly forward to the _delegate.
-  @override Color get color => _delegate.color;
-  @override String get debugLabel => _delegate.debugLabel;
-  @override TextDecoration get decoration => _delegate.decoration;
-  @override Color get decorationColor => _delegate.decorationColor;
-  @override TextDecorationStyle get decorationStyle => _delegate.decorationStyle;
-  @override String get fontFamily => _delegate.fontFamily;
-  @override List<String> get fontFamilyFallback => _delegate.fontFamilyFallback;
-  @override double get fontSize => _delegate.fontSize;
-  @override FontStyle get fontStyle => _delegate.fontStyle;
-  @override FontWeight get fontWeight => _delegate.fontWeight;
-  @override double get height => _delegate.height;
-  @override Locale get locale => _delegate.locale;
-  @override ui.Paint get foreground => _delegate.foreground;
-  @override ui.Paint get background => _delegate.background;
-  @override bool get inherit => _delegate.inherit;
-  @override double get letterSpacing => _delegate.letterSpacing;
-  @override TextBaseline get textBaseline => _delegate.textBaseline;
-  @override double get wordSpacing => _delegate.wordSpacing;
-  @override List<Shadow> get shadows => _delegate.shadows;
+  @override
+  Color get color => _delegate.color;
+  @override
+  Color get backgroundColor => _delegate.backgroundColor;
+  @override
+  String get debugLabel => _delegate.debugLabel;
+  @override
+  TextDecoration get decoration => _delegate.decoration;
+  @override
+  Color get decorationColor => _delegate.decorationColor;
+  @override
+  TextDecorationStyle get decorationStyle => _delegate.decorationStyle;
+  @override
+  double get decorationThickness => _delegate.decorationThickness;
+  @override
+  String get fontFamily => _delegate.fontFamily;
+  @override
+  List<String> get fontFamilyFallback => _delegate.fontFamilyFallback;
+  @override
+  double get fontSize => _delegate.fontSize;
+  @override
+  FontStyle get fontStyle => _delegate.fontStyle;
+  @override
+  FontWeight get fontWeight => _delegate.fontWeight;
+  @override
+  double get height => _delegate.height;
+  @override
+  Locale get locale => _delegate.locale;
+  @override
+  ui.Paint get foreground => _delegate.foreground;
+  @override
+  ui.Paint get background => _delegate.background;
+  @override
+  bool get inherit => _delegate.inherit;
+  @override
+  double get letterSpacing => _delegate.letterSpacing;
+  @override
+  TextBaseline get textBaseline => _delegate.textBaseline;
+  @override
+  double get wordSpacing => _delegate.wordSpacing;
+  @override
+  List<Shadow> get shadows => _delegate.shadows;
+  @override
+  List<ui.FontFeature> get fontFeatures => _delegate.fontFeatures;
 
   @override
-  String toString({DiagnosticLevel minLevel = DiagnosticLevel.debug}) =>
+  String toString({ DiagnosticLevel minLevel = DiagnosticLevel.debug }) =>
       super.toString();
 
   @override
-  DiagnosticsNode toDiagnosticsNode({String name, DiagnosticsTreeStyle style}) {
+  DiagnosticsNode toDiagnosticsNode({ String name, DiagnosticsTreeStyle style }) {
     throw UnimplementedError();
   }
 
@@ -700,7 +737,26 @@ class _TextStyleProxy implements TextStyle {
   }
 
   @override
-  TextStyle apply({Color color, TextDecoration decoration, Color decorationColor, TextDecorationStyle decorationStyle, String fontFamily, List<String> fontFamilyFallback, double fontSizeFactor = 1.0, double fontSizeDelta = 0.0, int fontWeightDelta = 0, double letterSpacingFactor = 1.0, double letterSpacingDelta = 0.0, double wordSpacingFactor = 1.0, double wordSpacingDelta = 0.0, double heightFactor = 1.0, double heightDelta = 0.0}) {
+  TextStyle apply({
+    Color color,
+    Color backgroundColor,
+    TextDecoration decoration,
+    Color decorationColor,
+    TextDecorationStyle decorationStyle,
+    double decorationThicknessFactor = 1.0,
+    double decorationThicknessDelta = 0.0,
+    String fontFamily,
+    List<String> fontFamilyFallback,
+    double fontSizeFactor = 1.0,
+    double fontSizeDelta = 0.0,
+    int fontWeightDelta = 0,
+    double letterSpacingFactor = 1.0,
+    double letterSpacingDelta = 0.0,
+    double wordSpacingFactor = 1.0,
+    double wordSpacingDelta = 0.0,
+    double heightFactor = 1.0,
+    double heightDelta = 0.0,
+  }) {
     throw UnimplementedError();
   }
 
@@ -710,22 +766,58 @@ class _TextStyleProxy implements TextStyle {
   }
 
   @override
-  TextStyle copyWith({Color color, String fontFamily, List<String> fontFamilyFallback, double fontSize, FontWeight fontWeight, FontStyle fontStyle, double letterSpacing, double wordSpacing, TextBaseline textBaseline, double height, Locale locale, ui.Paint foreground, ui.Paint background, List<Shadow> shadows, TextDecoration decoration, Color decorationColor, TextDecorationStyle decorationStyle, String debugLabel}) {
+  TextStyle copyWith({
+    bool inherit,
+    Color color,
+    Color backgroundColor,
+    String fontFamily,
+    List<String> fontFamilyFallback,
+    double fontSize,
+    FontWeight fontWeight,
+    FontStyle fontStyle,
+    double letterSpacing,
+    double wordSpacing,
+    TextBaseline textBaseline,
+    double height,
+    Locale locale,
+    ui.Paint foreground,
+    ui.Paint background,
+    List<Shadow> shadows,
+    List<ui.FontFeature> fontFeatures,
+    TextDecoration decoration,
+    Color decorationColor,
+    TextDecorationStyle decorationStyle,
+    double decorationThickness,
+    String debugLabel,
+  }) {
     throw UnimplementedError();
   }
 
   @override
-  void debugFillProperties(DiagnosticPropertiesBuilder properties, {String prefix = ''}) {
+  void debugFillProperties(DiagnosticPropertiesBuilder properties, { String prefix = '' }) {
     throw UnimplementedError();
   }
 
   @override
-  ui.ParagraphStyle getParagraphStyle({TextAlign textAlign, TextDirection textDirection, double textScaleFactor = 1.0, String ellipsis, int maxLines, Locale locale}) {
+  ui.ParagraphStyle getParagraphStyle({
+    TextAlign textAlign,
+    TextDirection textDirection,
+    double textScaleFactor = 1.0,
+    String ellipsis,
+    int maxLines,
+    Locale locale,
+    String fontFamily,
+    double fontSize,
+    FontWeight fontWeight,
+    FontStyle fontStyle,
+    double height,
+    StrutStyle strutStyle,
+  }) {
     throw UnimplementedError();
   }
 
   @override
-  ui.TextStyle getTextStyle({double textScaleFactor = 1.0}) {
+  ui.TextStyle getTextStyle({ double textScaleFactor = 1.0 }) {
     throw UnimplementedError();
   }
 

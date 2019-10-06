@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:file/file.dart';
 import 'package:stream_channel/stream_channel.dart';
 
 import 'base/io.dart';
 import 'base/process.dart';
+import 'convert.dart';
 import 'globals.dart';
 
 const String _kManifest = 'MANIFEST.txt';
@@ -24,7 +24,7 @@ const String _kData = 'data';
 class RecordingVMServiceChannel extends DelegatingStreamChannel<String> {
   RecordingVMServiceChannel(StreamChannel<String> delegate, Directory location)
       : super(delegate) {
-    addShutdownHook(() async {
+    addShutdownHook(() {
       // Sort the messages such that they are ordered
       // `[request1, response1, request2, response2, ...]`. This serves no
       // purpose other than to make the serialized format more human-readable.
@@ -32,7 +32,7 @@ class RecordingVMServiceChannel extends DelegatingStreamChannel<String> {
 
       final File file = _getManifest(location);
       final String json = const JsonEncoder.withIndent('  ').convert(_messages);
-      await file.writeAsString(json, flush: true);
+      file.writeAsStringSync(json, flush: true);
     }, ShutdownStage.SERIALIZE_RECORDING);
   }
 
@@ -180,7 +180,7 @@ class _RecordingSink implements StreamSink<String> {
   }
 
   @override
-  void addError(dynamic errorEvent, [StackTrace stackTrace]) {
+  void addError(dynamic errorEvent, [ StackTrace stackTrace ]) {
     throw UnimplementedError('Add support for this if the need ever arises');
   }
 
@@ -195,7 +195,7 @@ class _RecordingSink implements StreamSink<String> {
 /// replays the corresponding responses back from the recording.
 class ReplayVMServiceChannel extends StreamChannelMixin<String> {
   ReplayVMServiceChannel(Directory location)
-      : _transactions = _loadTransactions(location);
+    : _transactions = _loadTransactions(location);
 
   final Map<int, _Transaction> _transactions;
   final StreamController<String> _controller = StreamController<String>();
@@ -225,8 +225,9 @@ class ReplayVMServiceChannel extends StreamChannelMixin<String> {
   }
 
   void send(_Request request) {
-    if (!_transactions.containsKey(request.id))
+    if (!_transactions.containsKey(request.id)) {
       throw ArgumentError('No matching invocation found');
+    }
     final _Transaction transaction = _transactions.remove(request.id);
     // TODO(tvolkert): validate that `transaction.request` matches `request`
     if (transaction.response == null) {
@@ -237,8 +238,9 @@ class ReplayVMServiceChannel extends StreamChannelMixin<String> {
       exit(0);
     } else {
       _controller.add(json.encoder.convert(transaction.response.data));
-      if (_transactions.isEmpty)
+      if (_transactions.isEmpty) {
         _controller.close();
+      }
     }
   }
 
@@ -266,13 +268,14 @@ class _ReplaySink implements StreamSink<String> {
 
   @override
   void add(String data) {
-    if (_completer.isCompleted)
+    if (_completer.isCompleted) {
       throw StateError('Sink already closed');
+    }
     channel.send(_Request.fromString(data));
   }
 
   @override
-  void addError(dynamic errorEvent, [StackTrace stackTrace]) {
+  void addError(dynamic errorEvent, [ StackTrace stackTrace ]) {
     throw UnimplementedError('Add support for this if the need ever arises');
   }
 

@@ -42,7 +42,7 @@ import 'theme.dart';
 class BottomAppBar extends StatefulWidget {
   /// Creates a bottom application bar.
   ///
-  /// The [clipBehavior] argument must not be null.
+  /// The [clipBehavior] argument defaults to [Clip.none] and must not be null.
   /// Additionally, [elevation] must be non-negative.
   ///
   /// If [color], [elevation], or [shape] are null, their [BottomAppBarTheme] values will be used.
@@ -56,9 +56,9 @@ class BottomAppBar extends StatefulWidget {
     this.clipBehavior = Clip.none,
     this.notchMargin = 4.0,
     this.child,
-  }) : assert(clipBehavior != null),
-       assert(elevation == null || elevation >= 0.0),
+  }) : assert(elevation == null || elevation >= 0.0),
        assert(notchMargin != null),
+       assert(clipBehavior != null),
        super(key: key);
 
   /// The widget below this widget in the tree.
@@ -92,6 +92,8 @@ class BottomAppBar extends StatefulWidget {
   final NotchedShape shape;
 
   /// {@macro flutter.widgets.Clip}
+  ///
+  /// Defaults to [Clip.none], and must not be null.
   final Clip clipBehavior;
 
   /// The margin between the [FloatingActionButton] and the [BottomAppBar]'s
@@ -156,19 +158,20 @@ class _BottomAppBarClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
-    final Rect appBar = Offset.zero & size;
-    if (geometry.value.floatingActionButtonArea == null) {
-      return Path()..addRect(appBar);
-    }
-
     // button is the floating action button's bounding rectangle in the
-    // coordinate system that origins at the appBar's top left corner.
-    final Rect button = geometry.value.floatingActionButtonArea
-      .translate(0.0, geometry.value.bottomNavigationBarTop * -1.0);
-
-    return shape.getOuterPath(appBar, button.inflate(notchMargin));
+    // coordinate system whose origin is at the appBar's top left corner,
+    // or null if there is no floating action button.
+    final Rect button = geometry.value.floatingActionButtonArea?.translate(
+      0.0,
+      geometry.value.bottomNavigationBarTop * -1.0,
+    );
+    return shape.getOuterPath(Offset.zero & size, button?.inflate(notchMargin));
   }
 
   @override
-  bool shouldReclip(_BottomAppBarClipper oldClipper) => oldClipper.geometry != geometry;
+  bool shouldReclip(_BottomAppBarClipper oldClipper) {
+    return oldClipper.geometry != geometry
+        || oldClipper.shape != shape
+        || oldClipper.notchMargin != notchMargin;
+  }
 }

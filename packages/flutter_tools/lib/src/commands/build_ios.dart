@@ -10,7 +10,7 @@ import '../base/utils.dart';
 import '../build_info.dart';
 import '../globals.dart';
 import '../ios/mac.dart';
-import '../runner/flutter_command.dart' show FlutterCommandResult;
+import '../runner/flutter_command.dart' show DevelopmentArtifact, FlutterCommandResult;
 import 'build.dart';
 
 class BuildIOSCommand extends BuildSubCommand {
@@ -49,17 +49,25 @@ class BuildIOSCommand extends BuildSubCommand {
   final String description = 'Build an iOS application bundle (Mac OS X host only).';
 
   @override
+  Future<Set<DevelopmentArtifact>> get requiredArtifacts async => const <DevelopmentArtifact>{
+    DevelopmentArtifact.universal,
+    DevelopmentArtifact.iOS,
+  };
+
+  @override
   Future<FlutterCommandResult> runCommand() async {
     final bool forSimulator = argResults['simulator'];
     defaultBuildMode = forSimulator ? BuildMode.debug : BuildMode.release;
 
-    if (getCurrentHostPlatform() != HostPlatform.darwin_x64)
+    if (getCurrentHostPlatform() != HostPlatform.darwin_x64) {
       throwToolExit('Building for iOS is only supported on the Mac.');
+    }
 
     final BuildableIOSApp app = await applicationPackages.getPackageForPlatform(TargetPlatform.ios);
 
-    if (app == null)
+    if (app == null) {
       throwToolExit('Application not configured for iOS');
+    }
 
     final bool shouldCodesign = argResults['codesign'];
 
@@ -68,8 +76,9 @@ class BuildIOSCommand extends BuildSubCommand {
         'have to manually codesign before deploying to device.');
     }
     final BuildInfo buildInfo = getBuildInfo();
-    if (forSimulator && !buildInfo.supportsSimulator)
+    if (forSimulator && !buildInfo.supportsSimulator) {
       throwToolExit('${toTitleCase(buildInfo.friendlyModeName)} mode is not supported for simulators.');
+    }
 
     final String logTarget = forSimulator ? 'simulator' : 'device';
 
@@ -88,8 +97,9 @@ class BuildIOSCommand extends BuildSubCommand {
       throwToolExit('Encountered error while building for $logTarget.');
     }
 
-    if (result.output != null)
+    if (result.output != null) {
       printStatus('Built ${result.output}.');
+    }
 
     return null;
   }

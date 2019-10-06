@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 
+import '../base/common.dart';
 import '../base/file_system.dart' hide IOSink;
 import '../base/file_system.dart';
 import '../base/io.dart';
@@ -13,6 +13,7 @@ import '../base/platform.dart';
 import '../base/process_manager.dart';
 import '../base/terminal.dart';
 import '../base/utils.dart';
+import '../convert.dart';
 import '../globals.dart';
 
 class AnalysisServer {
@@ -26,6 +27,7 @@ class AnalysisServer {
       StreamController<bool>.broadcast();
   final StreamController<FileAnalysisErrors> _errorsController =
       StreamController<FileAnalysisErrors>.broadcast();
+  bool _didServerErrorOccur = false;
 
   int _id = 0;
 
@@ -35,6 +37,8 @@ class AnalysisServer {
     final List<String> command = <String>[
       fs.path.join(sdkPath, 'bin', 'dart'),
       snapshot,
+      '--disable-server-feature-completion',
+      '--disable-server-feature-search',
       '--sdk',
       sdkPath,
     ];
@@ -42,7 +46,7 @@ class AnalysisServer {
     printTrace('dart ${command.skip(1).join(' ')}');
     _process = await processManager.start(command);
     // This callback hookup can't throw.
-    _process.exitCode.whenComplete(() => _process = null); // ignore: unawaited_futures
+    unawaited(_process.exitCode.whenComplete(() => _process = null));
 
     final Stream<String> errorStream =
         _process.stderr.transform<String>(utf8.decoder).transform<String>(const LineSplitter());
@@ -53,13 +57,14 @@ class AnalysisServer {
     inStream.listen(_handleServerResponse);
 
     _sendCommand('server.setSubscriptions', <String, dynamic>{
-      'subscriptions': <String>['STATUS']
+      'subscriptions': <String>['STATUS'],
     });
 
     _sendCommand('analysis.setAnalysisRoots',
         <String, dynamic>{'included': directories, 'excluded': <String>[]});
   }
 
+  bool get didServerErrorOccur => _didServerErrorOccur;
   Stream<bool> get onAnalyzing => _analyzingController.stream;
   Stream<FileAnalysisErrors> get onErrors => _errorsController.stream;
 
@@ -69,7 +74,7 @@ class AnalysisServer {
     final String message = json.encode(<String, dynamic>{
       'id': (++_id).toString(),
       'method': method,
-      'params': params
+      'params': params,
     });
     _process.stdin.writeln(message);
     printTrace('==> $message');
@@ -86,12 +91,13 @@ class AnalysisServer {
         final dynamic params = response['params'];
 
         if (params is Map<dynamic, dynamic>) {
-          if (event == 'server.status')
+          if (event == 'server.status') {
             _handleStatus(response['params']);
-          else if (event == 'analysis.errors')
+          } else if (event == 'analysis.errors') {
             _handleAnalysisIssues(response['params']);
-          else if (event == 'server.error')
+          } else if (event == 'server.error') {
             _handleServerError(response['params']);
+          }
         }
       } else if (response['error'] != null) {
         // Fields are 'code', 'message', and 'stackTrace'.
@@ -119,6 +125,7 @@ class AnalysisServer {
     if (error['stackTrace'] != null) {
       printError(error['stackTrace']);
     }
+    _didServerErrorOccur = true;
   }
 
   void _handleAnalysisIssues(Map<String, dynamic> issueInfo) {
@@ -129,8 +136,9 @@ class AnalysisServer {
         .map<Map<String, dynamic>>(castStringKeyedMap)
         .map<AnalysisError>((Map<String, dynamic> json) => AnalysisError(json))
         .toList();
-    if (!_errorsController.isClosed)
+    if (!_errorsController.isClosed) {
       _errorsController.add(FileAnalysisErrors(file, errors));
+    }
   }
 
   Future<bool> dispose() async {
@@ -197,15 +205,18 @@ class AnalysisError implements Comparable<AnalysisError> {
   @override
   int compareTo(AnalysisError other) {
     // Sort in order of file path, error location, severity, and message.
-    if (file != other.file)
+    if (file != other.file) {
       return file.compareTo(other.file);
+    }
 
-    if (offset != other.offset)
+    if (offset != other.offset) {
       return offset - other.offset;
+    }
 
     final int diff = other._severityLevel.index - _severityLevel.index;
-    if (diff != 0)
+    if (diff != 0) {
       return diff;
+    }
 
     return message.compareTo(other.message);
   }

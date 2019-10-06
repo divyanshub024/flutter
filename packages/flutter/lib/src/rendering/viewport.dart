@@ -10,7 +10,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/semantics.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-import 'binding.dart';
 import 'box.dart';
 import 'object.dart';
 import 'sliver.dart';
@@ -68,7 +67,7 @@ abstract class RenderAbstractViewport extends RenderObject {
   /// See also:
   ///
   ///  * [RevealedOffset], which describes the return value of this method.
-  RevealedOffset getOffsetToReveal(RenderObject target, double alignment, {Rect rect});
+  RevealedOffset getOffsetToReveal(RenderObject target, double alignment, { Rect rect });
 
   /// The default value for the cache extent of the viewport.
   ///
@@ -90,7 +89,8 @@ class RevealedOffset {
   const RevealedOffset({
     @required this.offset,
     @required this.rect,
-  }) : assert(offset != null), assert(rect != null);
+  }) : assert(offset != null),
+       assert(rect != null);
 
   /// Offset for the viewport to reveal a specific element in the viewport.
   ///
@@ -557,7 +557,7 @@ abstract class RenderViewportBase<ParentDataClass extends ContainerParentDataMix
   }
 
   @override
-  bool hitTestChildren(HitTestResult result, { Offset position }) {
+  bool hitTestChildren(BoxHitTestResult result, { Offset position }) {
     double mainAxisPosition, crossAxisPosition;
     switch (axis) {
       case Axis.vertical:
@@ -571,12 +571,25 @@ abstract class RenderViewportBase<ParentDataClass extends ContainerParentDataMix
     }
     assert(mainAxisPosition != null);
     assert(crossAxisPosition != null);
+    final SliverHitTestResult sliverResult = SliverHitTestResult.wrap(result);
     for (RenderSliver child in childrenInHitTestOrder) {
-      if (child.geometry.visible && child.hitTest(
-        result,
-        mainAxisPosition: computeChildMainAxisPosition(child, mainAxisPosition),
-        crossAxisPosition: crossAxisPosition
-      )) {
+      if (!child.geometry.visible) {
+        continue;
+      }
+      final Matrix4 transform = Matrix4.identity();
+      applyPaintTransform(child, transform);
+      final bool isHit = result.addWithPaintTransform(
+        transform: transform,
+        position: null, // Manually adapting from box to sliver position below.
+        hitTest: (BoxHitTestResult result, Offset _) {
+          return child.hitTest(
+            sliverResult,
+            mainAxisPosition: computeChildMainAxisPosition(child, mainAxisPosition),
+            crossAxisPosition: crossAxisPosition,
+          );
+        },
+      );
+      if (isHit) {
         return true;
       }
     }
@@ -584,7 +597,7 @@ abstract class RenderViewportBase<ParentDataClass extends ContainerParentDataMix
   }
 
   @override
-  RevealedOffset getOffsetToReveal(RenderObject target, double alignment, {Rect rect}) {
+  RevealedOffset getOffsetToReveal(RenderObject target, double alignment, { Rect rect }) {
     double leadingScrollOffset = 0.0;
     double targetMainAxisExtent;
     rect ??= target.paintBounds;
@@ -636,11 +649,29 @@ abstract class RenderViewportBase<ParentDataClass extends ContainerParentDataMix
           targetMainAxisExtent = bounds.height;
           break;
         case AxisDirection.right:
-          leadingScrollOffset += bounds.left;
+          double offset;
+          switch (growthDirection) {
+            case GrowthDirection.forward:
+              offset = bounds.left;
+              break;
+            case GrowthDirection.reverse:
+              offset = bounds.right;
+              break;
+          }
+          leadingScrollOffset += offset;
           targetMainAxisExtent = bounds.width;
           break;
         case AxisDirection.down:
-          leadingScrollOffset += bounds.top;
+          double offset;
+          switch (growthDirection) {
+            case GrowthDirection.forward:
+              offset = bounds.top;
+              break;
+            case GrowthDirection.reverse:
+              offset = bounds.bottom;
+              break;
+          }
+          leadingScrollOffset += offset;
           targetMainAxisExtent = bounds.height;
           break;
         case AxisDirection.left:
@@ -1107,6 +1138,9 @@ class RenderViewport extends RenderViewportBase<SliverPhysicalContainerParentDat
 
   /// The first child in the [GrowthDirection.forward] growth direction.
   ///
+  /// This child that will be at the position defined by [anchor] when the
+  /// [offset.pixels] is `0`.
+  ///
   /// Children after [center] will be placed in the [axisDirection] relative to
   /// the [center]. Children before [center] will be placed in the opposite of
   /// the [axisDirection] relative to the [center].
@@ -1133,7 +1167,7 @@ class RenderViewport extends RenderViewportBase<SliverPhysicalContainerParentDat
             if (!constraints.hasBoundedHeight) {
               throw FlutterError(
                 'Vertical viewport was given unbounded height.\n'
-                'Viewports expand in the scrolling direction to fill their container.'
+                'Viewports expand in the scrolling direction to fill their container. '
                 'In this case, a vertical viewport was given an unlimited amount of '
                 'vertical space in which to expand. This situation typically happens '
                 'when a scrollable widget is nested inside another scrollable widget.\n'

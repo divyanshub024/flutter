@@ -24,6 +24,12 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  static const ShapeDecoration _decoration =  ShapeDecoration(
+    shape: BeveledRectangleBorder(
+      side: BorderSide(color: kShrineBrown900, width: 0.5),
+      borderRadius: BorderRadius.all(Radius.circular(7.0)),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -31,12 +37,16 @@ class _LoginPageState extends State<LoginPage> {
       appBar: AppBar(
         elevation: 0.0,
         backgroundColor: Colors.white,
+        brightness: Brightness.light,
         leading: IconButton(
           icon: const BackButtonIcon(),
           tooltip: MaterialLocalizations.of(context).backButtonTooltip,
           onPressed: () {
+            // The login screen is immediately displayed on top of the Shrine
+            // home screen using onGenerateRoute and so rootNavigator must be
+            // set to true in order to get out of Shrine completely.
             Navigator.of(context, rootNavigator: true).pop();
-          }
+          },
         ),
       ),
       body: SafeArea(
@@ -57,20 +67,26 @@ class _LoginPageState extends State<LoginPage> {
             const SizedBox(height: 120.0),
             PrimaryColorOverride(
               color: kShrineBrown900,
-              child: TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  labelText: 'Username',
+              child: Container(
+                decoration: _decoration,
+                child: TextField(
+                  controller: _usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 12.0),
             PrimaryColorOverride(
               color: kShrineBrown900,
-              child: TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
+              child: Container(
+                decoration: _decoration,
+                child: TextField(
+                  controller: _passwordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Password',
+                  ),
                 ),
               ),
             ),
@@ -84,8 +100,11 @@ class _LoginPageState extends State<LoginPage> {
                         borderRadius: BorderRadius.all(Radius.circular(7.0)),
                       ),
                       onPressed: () {
-                        _usernameController.clear();
-                        _passwordController.clear();
+                        // The login screen is immediately displayed on top of
+                        // the Shrine home screen using onGenerateRoute and so
+                        // rootNavigator must be set to true in order to get out
+                        // of Shrine completely.
+                        Navigator.of(context, rootNavigator: true).pop();
                       },
                     ),
                     RaisedButton(

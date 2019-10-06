@@ -36,7 +36,7 @@ Future<void> main() async {
       paints
         ..drawImageRect(image: rawImage)
         ..rect(color: Colors.black)
-        ..rect(color: Colors.white)
+        ..rect(color: Colors.white),
     );
   });
 
@@ -57,8 +57,16 @@ Future<void> main() async {
       paints
         ..path(color: Color(Colors.blue.value))
         ..rect(color: Colors.black)
-        ..rect(color: Colors.white)
+        ..rect(color: Colors.white),
     );
+  }, skip: isBrowser);
+
+  test('ShapeDecoration with BorderDirectional', () {
+    const ShapeDecoration decoration = ShapeDecoration(
+      shape: BorderDirectional(start: BorderSide(color: Colors.red, width: 3)),
+    );
+
+    expect(decoration.padding, isInstanceOf<EdgeInsetsDirectional>());
   });
 
   testWidgets('TestBorder and Directionality - 1', (WidgetTester tester) async {
@@ -77,7 +85,7 @@ Future<void> main() async {
       log,
       <String>[
         'getOuterPath Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.ltr',
-        'paint Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.ltr'
+        'paint Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.ltr',
       ],
     );
   });
@@ -101,7 +109,7 @@ Future<void> main() async {
       log,
       <String>[
         'getInnerPath Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.rtl',
-        'paint Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.rtl'
+        'paint Rect.fromLTRB(0.0, 0.0, 800.0, 600.0) TextDirection.rtl',
       ],
     );
   });

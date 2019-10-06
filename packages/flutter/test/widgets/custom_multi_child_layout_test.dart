@@ -51,8 +51,8 @@ Widget buildFrame(MultiChildLayoutDelegate delegate) {
         LayoutId(id: 0, child: Container(width: 150.0, height: 100.0)),
         LayoutId(id: 1, child: Container(width: 100.0, height: 200.0)),
       ],
-      delegate: delegate
-    )
+      delegate: delegate,
+    ),
   );
 }
 
@@ -70,6 +70,23 @@ class PreferredSizeDelegate extends MultiChildLayoutDelegate {
   @override
   bool shouldRelayout(PreferredSizeDelegate oldDelegate) {
     return preferredSize != oldDelegate.preferredSize;
+  }
+}
+
+class NotifierLayoutDelegate extends MultiChildLayoutDelegate {
+  NotifierLayoutDelegate(this.size) : super(relayout: size);
+
+  final ValueNotifier<Size> size;
+
+  @override
+  Size getSize(BoxConstraints constraints) => size.value;
+
+  @override
+  void performLayout(Size size) { }
+
+  @override
+  bool shouldRelayout(NotifierLayoutDelegate oldDelegate) {
+    return size != oldDelegate.size;
   }
 }
 
@@ -127,13 +144,13 @@ void main() {
                 LayoutId(id: 0, child: Container(width: 150.0, height: 100.0)),
                 LayoutId(id: 1, child: Container(width: 100.0, height: 200.0)),
               ],
-              delegate: delegate
-            )
+              delegate: delegate,
+            ),
           ),
           LayoutId(id: 1, child: Container(width: 100.0, height: 200.0)),
         ],
-        delegate: delegate
-      )
+        delegate: delegate,
+      ),
     ));
 
   });
@@ -143,8 +160,8 @@ void main() {
     await tester.pumpWidget(Center(
       child: CustomMultiChildLayout(
         key: key,
-        delegate: PreferredSizeDelegate(preferredSize: const Size(300.0, 200.0))
-      )
+        delegate: PreferredSizeDelegate(preferredSize: const Size(300.0, 200.0)),
+      ),
     ));
 
     final RenderBox box = tester.renderObject(find.byKey(key));
@@ -154,11 +171,32 @@ void main() {
     await tester.pumpWidget(Center(
       child: CustomMultiChildLayout(
         key: key,
-        delegate: PreferredSizeDelegate(preferredSize: const Size(350.0, 250.0))
-      )
+        delegate: PreferredSizeDelegate(preferredSize: const Size(350.0, 250.0)),
+      ),
     ));
 
     expect(box.size.width, equals(350.0));
     expect(box.size.height, equals(250.0));
+  });
+
+  testWidgets('Can use listener for relayout', (WidgetTester tester) async {
+    final ValueNotifier<Size> size = ValueNotifier<Size>(const Size(100.0, 200.0));
+
+    await tester.pumpWidget(
+      Center(
+        child: CustomMultiChildLayout(
+          delegate: NotifierLayoutDelegate(size),
+        ),
+      ),
+    );
+
+    RenderBox box = tester.renderObject(find.byType(CustomMultiChildLayout));
+    expect(box.size, equals(const Size(100.0, 200.0)));
+
+    size.value = const Size(150.0, 240.0);
+    await tester.pump();
+
+    box = tester.renderObject(find.byType(CustomMultiChildLayout));
+    expect(box.size, equals(const Size(150.0, 240.0)));
   });
 }

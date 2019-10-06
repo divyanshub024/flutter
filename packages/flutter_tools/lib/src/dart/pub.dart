@@ -8,12 +8,14 @@ import 'package:meta/meta.dart';
 
 import '../base/common.dart';
 import '../base/file_system.dart';
+import '../base/io.dart' as io;
 import '../base/logger.dart';
 import '../base/platform.dart';
 import '../base/process.dart';
 import '../base/utils.dart';
 import '../cache.dart';
 import '../globals.dart';
+import '../reporting/reporting.dart';
 import '../runner/flutter_command.dart';
 import 'sdk.dart';
 
@@ -41,6 +43,7 @@ class PubContext {
   static final PubContext interactive = PubContext._(<String>['interactive']);
   static final PubContext pubGet = PubContext._(<String>['get']);
   static final PubContext pubUpgrade = PubContext._(<String>['upgrade']);
+  static final PubContext pubForward = PubContext._(<String>['forward']);
   static final PubContext runTest = PubContext._(<String>['run_test']);
 
   static final PubContext flutterTests = PubContext._(<String>['flutter_tests']);
@@ -52,18 +55,25 @@ class PubContext {
 
   @override
   String toString() => 'PubContext: ${_values.join(':')}';
+
+  String toAnalyticsString()  {
+    return _values.map((String s) => s.replaceAll('_', '-')).toList().join('-');
+  }
 }
 
 bool _shouldRunPubGet({ File pubSpecYaml, File dotPackages }) {
-  if (!dotPackages.existsSync())
+  if (!dotPackages.existsSync()) {
     return true;
+  }
   final DateTime dotPackagesLastModified = dotPackages.lastModifiedSync();
-  if (pubSpecYaml.lastModifiedSync().isAfter(dotPackagesLastModified))
+  if (pubSpecYaml.lastModifiedSync().isAfter(dotPackagesLastModified)) {
     return true;
+  }
   final File flutterToolsStamp = Cache.instance.getStampFileFor('flutter_tools');
   if (flutterToolsStamp.existsSync() &&
-      flutterToolsStamp.lastModifiedSync().isAfter(dotPackagesLastModified))
+      flutterToolsStamp.lastModifiedSync().isAfter(dotPackagesLastModified)) {
     return true;
+  }
   return false;
 }
 
@@ -75,31 +85,33 @@ Future<void> pubGet({
   bool skipIfAbsent = false,
   bool upgrade = false,
   bool offline = false,
-  bool checkLastModified = true
+  bool checkLastModified = true,
+  bool skipPubspecYamlCheck = false,
 }) async {
   directory ??= fs.currentDirectory.path;
 
   final File pubSpecYaml = fs.file(fs.path.join(directory, 'pubspec.yaml'));
   final File dotPackages = fs.file(fs.path.join(directory, '.packages'));
 
-  if (!pubSpecYaml.existsSync()) {
-    if (!skipIfAbsent)
+  if (!skipPubspecYamlCheck && !pubSpecYaml.existsSync()) {
+    if (!skipIfAbsent) {
       throwToolExit('$directory: no pubspec.yaml found');
+    }
     return;
   }
 
   if (!checkLastModified || _shouldRunPubGet(pubSpecYaml: pubSpecYaml, dotPackages: dotPackages)) {
     final String command = upgrade ? 'upgrade' : 'get';
     final Status status = logger.startProgress(
-      'Running "flutter packages $command" in ${fs.path.basename(directory)}...',
-      timeout: kSlowOperation,
+      'Running "flutter pub $command" in ${fs.path.basename(directory)}...',
+      timeout: timeoutConfiguration.slowOperation,
     );
-    final List<String> args = <String>['--verbosity=warning'];
-    if (FlutterCommand.current != null && FlutterCommand.current.globalResults['verbose'])
-      args.add('--verbose');
-    args.addAll(<String>[command, '--no-precompile']);
-    if (offline)
-      args.add('--offline');
+    final bool verbose = FlutterCommand.current != null && FlutterCommand.current.globalResults['verbose'];
+    final List<String> args = <String>[
+      if (verbose) '--verbose' else '--verbosity=warning',
+      ...<String>[command, '--no-precompile'],
+      if (offline) '--offline',
+    ];
     try {
       await pub(
         args,
@@ -116,11 +128,15 @@ Future<void> pubGet({
     }
   }
 
-  if (!dotPackages.existsSync())
-    throwToolExit('$directory: pub did not create .packages file');
+  if (!dotPackages.existsSync()) {
+    throwToolExit('$directory: pub did not create .packages file.');
+  }
 
-  if (dotPackages.lastModifiedSync().isBefore(pubSpecYaml.lastModifiedSync()))
-    throwToolExit('$directory: pub did not update .packages file (pubspec.yaml file has a newer timestamp)');
+  if (dotPackages.lastModifiedSync().isBefore(pubSpecYaml.lastModifiedSync())) {
+    throwToolExit('$directory: pub did not update .packages file '
+                  '(pubspec.yaml timestamp: ${pubSpecYaml.lastModifiedSync()}; '
+                  '.packages timestamp: ${dotPackages.lastModifiedSync()}).');
+  }
 }
 
 typedef MessageFilter = String Function(String message);
@@ -135,7 +151,8 @@ typedef MessageFilter = String Function(String message);
 ///
 /// [context] provides extra information to package server requests to
 /// understand usage.
-Future<void> pub(List<String> arguments, {
+Future<void> pub(
+  List<String> arguments, {
   @required PubContext context,
   String directory,
   MessageFilter filter,
@@ -145,50 +162,92 @@ Future<void> pub(List<String> arguments, {
 }) async {
   showTraceForErrors ??= isRunningOnBot;
 
-  if (showTraceForErrors)
+  bool versionSolvingFailed = false;
+  String filterWrapper(String line) {
+    if (line.contains('version solving failed')) {
+      versionSolvingFailed = true;
+    }
+    if (filter == null) {
+      return line;
+    }
+    return filter(line);
+  }
+
+  if (showTraceForErrors) {
     arguments.insert(0, '--trace');
+  }
   int attempts = 0;
   int duration = 1;
   int code;
   while (true) {
     attempts += 1;
-    code = await runCommandAndStreamOutput(
+    code = await processUtils.stream(
       _pubCommand(arguments),
       workingDirectory: directory,
-      mapFunction: filter,
+      mapFunction: filterWrapper,
       environment: _createPubEnvironment(context),
     );
-    if (code != 69) // UNAVAILABLE in https://github.com/dart-lang/pub/blob/master/lib/src/exit_codes.dart
+    if (code != 69) { // UNAVAILABLE in https://github.com/dart-lang/pub/blob/master/lib/src/exit_codes.dart
       break;
+    }
+    versionSolvingFailed = false;
     printStatus('$failureMessage ($code) -- attempting retry $attempts in $duration second${ duration == 1 ? "" : "s"}...');
     await Future<void>.delayed(Duration(seconds: duration));
-    if (duration < 64)
+    if (duration < 64) {
       duration *= 2;
+    }
   }
   assert(code != null);
-  if (code != 0)
+
+  String result = 'success';
+  if (versionSolvingFailed) {
+    result = 'version-solving-failed';
+  } else if (code != 0) {
+    result = 'failure';
+  }
+  PubResultEvent(
+    context: context.toAnalyticsString(),
+    result: result,
+  ).send();
+
+  if (code != 0) {
     throwToolExit('$failureMessage ($code)', exitCode: code);
+  }
 }
 
 /// Runs pub in 'interactive' mode, directly piping the stdin stream of this
 /// process to that of pub, and the stdout/stderr stream of pub to the corresponding
 /// streams of this process.
-Future<void> pubInteractively(List<String> arguments, {
+Future<void> pubInteractively(
+  List<String> arguments, {
   String directory,
 }) async {
   Cache.releaseLockEarly();
-  final int code = await runInteractively(
+  final io.Process process = await processUtils.start(
     _pubCommand(arguments),
     workingDirectory: directory,
     environment: _createPubEnvironment(PubContext.interactive),
   );
-  if (code != 0)
+
+  // Pipe the Flutter tool stdin to the pub stdin.
+  unawaited(process.stdin.addStream(io.stdin));
+
+  // Pipe the put stdout and stderr to the tool stdout and stderr.
+  await Future.wait<dynamic>(<Future<dynamic>>[
+    io.stdout.addStream(process.stdout),
+    io.stderr.addStream(process.stderr),
+  ]);
+
+  // Wait for pub to exit.
+  final int code = await process.exitCode;
+  if (code != 0) {
     throwToolExit('pub finished with exit code $code', exitCode: code);
+  }
 }
 
 /// The command used for running pub.
 List<String> _pubCommand(List<String> arguments) {
-  return <String>[ sdkBinaryName('pub') ]..addAll(arguments);
+  return <String>[sdkBinaryName('pub'), ...arguments];
 }
 
 /// The full environment used when running pub.
@@ -224,21 +283,13 @@ const String _pubCacheEnvironmentKey = 'PUB_CACHE';
 String _getPubEnvironmentValue(PubContext pubContext) {
   // DO NOT update this function without contacting kevmoo.
   // We have server-side tooling that assumes the values are consistent.
-  final List<String> values = <String>[];
-
   final String existing = platform.environment[_pubEnvironmentKey];
-
-  if ((existing != null) && existing.isNotEmpty) {
-    values.add(existing);
-  }
-
-  if (isRunningOnBot) {
-    values.add('flutter_bot');
-  }
-
-  values.add('flutter_cli');
-  values.addAll(pubContext._values);
-
+  final List<String> values = <String>[
+    if (existing != null && existing.isNotEmpty) existing,
+    if (isRunningOnBot) 'flutter_bot',
+    'flutter_cli',
+    ...pubContext._values,
+  ];
   return values.join(':');
 }
 
@@ -262,9 +313,11 @@ String _filterOverrideWarnings(String message) {
   //   Warning: You are using these overridden dependencies:
   //   ! analyzer 0.29.0-alpha.0 from path ../../bin/cache/dart-sdk/lib/analyzer
   //   ! front_end 0.1.0-alpha.0 from path ../../bin/cache/dart-sdk/lib/front_end
-  if (message == 'Warning: You are using these overridden dependencies:')
+  if (message == 'Warning: You are using these overridden dependencies:') {
     return null;
-  if (message.contains(_analyzerWarning))
+  }
+  if (message.contains(_analyzerWarning)) {
     return null;
+  }
   return message;
 }

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import 'dart:collection' show SplayTreeMap, HashMap;
+import 'dart:math' as math show max;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/rendering.dart';
 import 'automatic_keep_alive.dart';
 import 'basic.dart';
 import 'framework.dart';
+import 'sliver_layout_builder.dart';
 
 export 'package:flutter/rendering.dart' show
   SliverGridDelegate,
@@ -125,7 +127,11 @@ abstract class SliverChildDelegate {
   /// return a precise non-null value.
   ///
   /// Subclasses typically override this function and wrap their children in
-  /// [AutomaticKeepAlive] and [RepaintBoundary] widgets.
+  /// [AutomaticKeepAlive], [IndexedSemantics], and [RepaintBoundary] widgets.
+  ///
+  /// The values returned by this method are cached. To indicate that the
+  /// widgets have changed, a new delegate must be provided, and the new
+  /// delegate's [shouldRebuild] method must return true.
   Widget build(BuildContext context, int index);
 
   /// Returns an estimate of the number of children this delegate will build.
@@ -161,7 +167,7 @@ abstract class SliverChildDelegate {
   ///
   /// Useful for subclasses that which to track which children are included in
   /// the underlying render tree.
-  void didFinishLayout(int firstIndex, int lastIndex) {}
+  void didFinishLayout(int firstIndex, int lastIndex) { }
 
   /// Called whenever a new instance of the child delegate class is
   /// provided to the sliver.
@@ -173,6 +179,13 @@ abstract class SliverChildDelegate {
   /// If the method returns false, then the [build] call might be optimized
   /// away.
   bool shouldRebuild(covariant SliverChildDelegate oldDelegate);
+
+  /// Find index of child element with associated key.
+  ///
+  /// This will be called during [performRebuild] in [SliverMultiBoxAdaptorElement]
+  /// to check if a child has moved to a different position. It should return the
+  /// index of the child element with associated key, null if not found.
+  int findIndexByKey(Key key) => null;
 
   @override
   String toString() {
@@ -194,6 +207,12 @@ abstract class SliverChildDelegate {
     }
   }
 }
+
+class _SaltedValueKey extends ValueKey<Key>{
+  const _SaltedValueKey(Key key): assert(key != null), super(key);
+}
+
+typedef ChildIndexGetter = int Function(Key key);
 
 /// A delegate that supplies children for slivers using a builder callback.
 ///
@@ -255,7 +274,7 @@ abstract class SliverChildDelegate {
 ///
 /// In certain cases, only a subset of child widgets should be annotated
 /// with a semantic index. For example, in [new ListView.separated()] the
-/// separators do not have an index assocaited with them. This is done by
+/// separators do not have an index associated with them. This is done by
 /// providing a `semanticIndexCallback` which returns null for separators
 /// indexes and rounds the non-separator indexes down by half.
 ///
@@ -306,8 +325,14 @@ class SliverChildBuilderDelegate extends SliverChildDelegate {
   /// The [builder], [addAutomaticKeepAlives], [addRepaintBoundaries],
   /// [addSemanticIndexes], and [semanticIndexCallback] arguments must not be
   /// null.
+  ///
+  /// If the order in which [builder] returns children ever changes, consider
+  /// providing a [findChildIndex]. This allows the delegate to find the new index
+  /// for a child that was previously located at a different index to attach the
+  /// existing state to the [Widget] at its new location.
   const SliverChildBuilderDelegate(
     this.builder, {
+    this.findChildIndexCallback,
     this.childCount,
     this.addAutomaticKeepAlives = true,
     this.addRepaintBoundaries = true,
@@ -388,6 +413,31 @@ class SliverChildBuilderDelegate extends SliverChildDelegate {
   /// Defaults to providing an index for each widget.
   final SemanticIndexCallback semanticIndexCallback;
 
+  /// Called to find the new index of a child based on its key in case of reordering.
+  ///
+  /// If not provided, a child widget may not map to its existing [RenderObject]
+  /// when the order in which children are returned from [builder] changes.
+  /// This may result in state-loss.
+  ///
+  /// This callback should take an input [Key], and It should return the
+  /// index of the child element with associated key, null if not found.
+  final ChildIndexGetter findChildIndexCallback;
+
+  @override
+  int findIndexByKey(Key key) {
+    if (findChildIndexCallback == null)
+      return null;
+    assert(key != null);
+    Key childKey;
+    if (key is _SaltedValueKey) {
+      final _SaltedValueKey saltedValueKey = key;
+      childKey = saltedValueKey.value;
+    } else {
+      childKey = key;
+    }
+    return findChildIndexCallback(childKey);
+  }
+
   @override
   Widget build(BuildContext context, int index) {
     assert(builder != null);
@@ -401,8 +451,9 @@ class SliverChildBuilderDelegate extends SliverChildDelegate {
     }
     if (child == null)
       return null;
+    final Key key = child.key != null ? _SaltedValueKey(child.key) : null;
     if (addRepaintBoundaries)
-      child = RepaintBoundary.wrap(child, index);
+      child = RepaintBoundary(child: child);
     if (addSemanticIndexes) {
       final int semanticIndex = semanticIndexCallback(child, index);
       if (semanticIndex != null)
@@ -410,7 +461,7 @@ class SliverChildBuilderDelegate extends SliverChildDelegate {
     }
     if (addAutomaticKeepAlives)
       child = AutomaticKeepAlive(child: child);
-    return child;
+    return KeyedSubtree(child: child, key: key);
   }
 
   @override
@@ -460,7 +511,7 @@ class SliverChildBuilderDelegate extends SliverChildDelegate {
 ///
 /// In certain cases, only a subset of child widgets should be annotated
 /// with a semantic index. For example, in [new ListView.separated()] the
-/// separators do not have an index assocaited with them. This is done by
+/// separators do not have an index associated with them. This is done by
 /// providing a `semanticIndexCallback` which returns null for separators
 /// indexes and rounds the non-separator indexes down by half.
 ///
@@ -478,7 +529,10 @@ class SliverChildListDelegate extends SliverChildDelegate {
   /// The [children], [addAutomaticKeepAlives], [addRepaintBoundaries],
   /// [addSemanticIndexes], and [semanticIndexCallback] arguments must not be
   /// null.
-  const SliverChildListDelegate(
+  ///
+  /// If the order of children` never changes, consider using the constant
+  /// [SliverChildListDelegate.fixed] constructor.
+  SliverChildListDelegate(
     this.children, {
     this.addAutomaticKeepAlives = true,
     this.addRepaintBoundaries = true,
@@ -489,7 +543,31 @@ class SliverChildListDelegate extends SliverChildDelegate {
        assert(addAutomaticKeepAlives != null),
        assert(addRepaintBoundaries != null),
        assert(addSemanticIndexes != null),
-       assert(semanticIndexCallback != null);
+       assert(semanticIndexCallback != null),
+       _keyToIndex = <Key, int>{null: 0};
+
+  /// Creates a constant version of the delegate that supplies children for
+  /// slivers using the given list.
+  ///
+  /// If the order of the children will change, consider using the regular
+  /// [SliverChildListDelegate] constructor.
+  ///
+  /// The [children], [addAutomaticKeepAlives], [addRepaintBoundaries],
+  /// [addSemanticIndexes], and [semanticIndexCallback] arguments must not be
+  /// null.
+  const SliverChildListDelegate.fixed(
+    this.children, {
+    this.addAutomaticKeepAlives = true,
+    this.addRepaintBoundaries = true,
+    this.addSemanticIndexes = true,
+    this.semanticIndexCallback = _kDefaultSemanticIndexCallback,
+    this.semanticIndexOffset = 0,
+  }) : assert(children != null),
+       assert(addAutomaticKeepAlives != null),
+       assert(addRepaintBoundaries != null),
+       assert(addSemanticIndexes != null),
+       assert(semanticIndexCallback != null),
+       _keyToIndex = null;
 
   /// Whether to wrap each child in an [AutomaticKeepAlive].
   ///
@@ -544,15 +622,66 @@ class SliverChildListDelegate extends SliverChildDelegate {
   /// The widgets to display.
   final List<Widget> children;
 
+  /// A map to cache key to index lookup for children.
+  ///
+  /// _keyToIndex[null] is used as current index during the lazy loading process
+  /// in [_findChildIndex]. _keyToIndex should never be used for looking up null key.
+  final Map<Key, int> _keyToIndex;
+
+  bool get _isConstantInstance => _keyToIndex == null;
+
+  int _findChildIndex(Key key) {
+    if (_isConstantInstance) {
+      return null;
+    }
+    // Lazily fill the [_keyToIndex].
+    if (!_keyToIndex.containsKey(key)) {
+      int index = _keyToIndex[null];
+      while (index < children.length) {
+        final Widget child = children[index];
+        if (child.key != null) {
+          _keyToIndex[child.key] = index;
+        }
+        if (child.key == key) {
+          // Record current index for next function call.
+          _keyToIndex[null] = index + 1;
+          return index;
+        }
+        index += 1;
+      }
+      _keyToIndex[null] = index;
+    } else {
+      return _keyToIndex[key];
+    }
+    return null;
+  }
+
+  @override
+  int findIndexByKey(Key key) {
+    assert(key != null);
+    Key childKey;
+    if (key is _SaltedValueKey) {
+      final _SaltedValueKey saltedValueKey = key;
+      childKey = saltedValueKey.value;
+    } else {
+      childKey = key;
+    }
+    return _findChildIndex(childKey);
+  }
+
   @override
   Widget build(BuildContext context, int index) {
     assert(children != null);
     if (index < 0 || index >= children.length)
       return null;
     Widget child = children[index];
-    assert(child != null);
+    final Key key = child.key != null? _SaltedValueKey(child.key) : null;
+    assert(
+      child != null,
+      "The sliver's children must not contain null values, but a null value was found at index $index"
+    );
     if (addRepaintBoundaries)
-      child = RepaintBoundary.wrap(child, index);
+      child = RepaintBoundary(child: child);
     if (addSemanticIndexes) {
       final int semanticIndex = semanticIndexCallback(child, index);
       if (semanticIndex != null)
@@ -560,7 +689,7 @@ class SliverChildListDelegate extends SliverChildDelegate {
     }
     if (addAutomaticKeepAlives)
       child = AutomaticKeepAlive(child: child);
-    return child;
+    return KeyedSubtree(child: child, key: key);
   }
 
   @override
@@ -586,6 +715,10 @@ abstract class SliverWithKeepAliveWidget extends RenderObjectWidget {
 /// A base class for sliver that have multiple box children.
 ///
 /// Helps subclasses build their children lazily using a [SliverChildDelegate].
+///
+/// The widgets returned by the [delegate] are cached and the delegate is only
+/// consulted again if it changes and the new delegate's [shouldRebuild] method
+/// returns true.
 abstract class SliverMultiBoxAdaptorWidget extends SliverWithKeepAliveWidget {
   /// Initializes fields for subclasses.
   const SliverMultiBoxAdaptorWidget({
@@ -594,9 +727,10 @@ abstract class SliverMultiBoxAdaptorWidget extends SliverWithKeepAliveWidget {
   }) : assert(delegate != null),
        super(key: key);
 
+  /// {@template flutter.widgets.sliverChildDelegate}
   /// The delegate that provides the children for this widget.
   ///
-  /// The children are constructed lazily using this widget to avoid creating
+  /// The children are constructed lazily using this delegate to avoid creating
   /// more children than are visible through the [Viewport].
   ///
   /// See also:
@@ -604,6 +738,7 @@ abstract class SliverMultiBoxAdaptorWidget extends SliverWithKeepAliveWidget {
   ///  * [SliverChildBuilderDelegate] and [SliverChildListDelegate], which are
   ///    commonly used subclasses of [SliverChildDelegate] that use a builder
   ///    callback and an explicit child list, respectively.
+  /// {@endtemplate}
   final SliverChildDelegate delegate;
 
   @override
@@ -655,6 +790,8 @@ abstract class SliverMultiBoxAdaptorWidget extends SliverWithKeepAliveWidget {
 /// children outside the visible part of the sliver are not materialized, which
 /// means [SliverList] cannot learn their main axis extent. Instead, newly
 /// materialized children are placed adjacent to existing children.
+///
+/// {@youtube 560 315 https://www.youtube.com/watch?v=ORiTTaVY6mM}
 ///
 /// If the children have a fixed extent in the main axis, consider using
 /// [SliverFixedExtentList] rather than [SliverList] because
@@ -761,6 +898,8 @@ class SliverFixedExtentList extends SliverMultiBoxAdaptorWidget {
 ///
 /// The main axis direction of a grid is the direction in which it scrolls; the
 /// cross axis direction is the orthogonal direction.
+///
+/// {@youtube 560 315 https://www.youtube.com/watch?v=ORiTTaVY6mM}
 ///
 /// {@tool sample}
 ///
@@ -903,15 +1042,16 @@ class SliverGrid extends SliverMultiBoxAdaptorWidget {
 ///    the main axis extent of each item.
 ///  * [SliverList], which does not require its children to have the same
 ///    extent in the main axis.
-class SliverFillViewport extends SliverMultiBoxAdaptorWidget {
+class SliverFillViewport extends StatelessWidget {
   /// Creates a sliver whose box children that each fill the viewport.
   const SliverFillViewport({
     Key key,
-    @required SliverChildDelegate delegate,
+    @required this.delegate,
     this.viewportFraction = 1.0,
   }) : assert(viewportFraction != null),
        assert(viewportFraction > 0.0),
-       super(key: key, delegate: delegate);
+       assert(delegate != null),
+       super(key: key);
 
   /// The fraction of the viewport that each child should fill in the main axis.
   ///
@@ -920,15 +1060,34 @@ class SliverFillViewport extends SliverMultiBoxAdaptorWidget {
   /// the viewport in the main axis.
   final double viewportFraction;
 
-  @override
-  RenderSliverFillViewport createRenderObject(BuildContext context) {
-    final SliverMultiBoxAdaptorElement element = context;
-    return RenderSliverFillViewport(childManager: element, viewportFraction: viewportFraction);
-  }
+  /// {@macro flutter.widgets.sliverChildDelegate}
+  final SliverChildDelegate delegate;
 
   @override
-  void updateRenderObject(BuildContext context, RenderSliverFillViewport renderObject) {
-    renderObject.viewportFraction = viewportFraction;
+  Widget build(BuildContext context) {
+    return SliverLayoutBuilder(
+      builder: (BuildContext context, SliverConstraints constraints) {
+        final double fixedExtent = constraints.viewportMainAxisExtent * viewportFraction;
+        final double padding = math.max(0, constraints.viewportMainAxisExtent - fixedExtent) / 2;
+
+        EdgeInsets sliverPaddingValue;
+        switch (constraints.axis) {
+          case Axis.horizontal:
+            sliverPaddingValue = EdgeInsets.symmetric(horizontal: padding);
+            break;
+          case Axis.vertical:
+            sliverPaddingValue = EdgeInsets.symmetric(vertical: padding);
+        }
+
+        return SliverPadding(
+          padding: sliverPaddingValue,
+          sliver: SliverFixedExtentList(
+            delegate: delegate,
+            itemExtent: fixedExtent,
+          ),
+        );
+      }
+    );
   }
 }
 
@@ -975,9 +1134,15 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
     _currentBeforeChild = null;
     assert(_currentlyUpdatingChildIndex == null);
     try {
+      final SplayTreeMap<int, Element> newChildren = SplayTreeMap<int, Element>();
+
       void processElement(int index) {
         _currentlyUpdatingChildIndex = index;
-        final Element newChild = updateChild(_childElements[index], _build(index), index);
+        if (_childElements[index] != null && _childElements[index] != newChildren[index]) {
+          // This index has an old child that isn't used anywhere and should be deactivated.
+          _childElements[index] = updateChild(_childElements[index], null, index);
+        }
+        final Element newChild = updateChild(newChildren[index], _build(index), index);
         if (newChild != null) {
           _childElements[index] = newChild;
           final SliverMultiBoxAdaptorParentData parentData = newChild.renderObject.parentData;
@@ -987,14 +1152,32 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
           _childElements.remove(index);
         }
       }
-      // processElement may modify the Map - need to do a .toList() here.
-      _childElements.keys.toList().forEach(processElement);
+
+      for (int index in _childElements.keys.toList()) {
+        final Key key = _childElements[index].widget.key;
+        final int newIndex = key == null ? null : widget.delegate.findIndexByKey(key);
+        if (newIndex != null && newIndex != index) {
+          newChildren[newIndex] = _childElements[index];
+          // We need to make sure the original index gets processed.
+          newChildren.putIfAbsent(index, () => null);
+          // We do not want the remapped child to get deactivated during processElement.
+          _childElements.remove(index);
+        } else {
+          newChildren.putIfAbsent(index, () => _childElements[index]);
+        }
+      }
+
+      renderObject.debugChildIntegrityEnabled = false; // Moving children will temporary violate the integrity.
+      newChildren.keys.forEach(processElement);
       if (_didUnderflow) {
         final int lastKey = _childElements.lastKey() ?? -1;
-        processElement(lastKey + 1);
+        final int rightBoundary = lastKey + 1;
+        newChildren[rightBoundary] = _childElements[rightBoundary];
+        processElement(rightBoundary);
       }
     } finally {
       _currentlyUpdatingChildIndex = null;
+      renderObject.debugChildIntegrityEnabled = true;
     }
   }
 
@@ -1034,7 +1217,6 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
     if (oldParentData != newParentData && oldParentData != null && newParentData != null) {
       newParentData.layoutOffset = oldParentData.layoutOffset;
     }
-
     return newChild;
   }
 
@@ -1081,7 +1263,8 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
   }
 
   @override
-  double estimateMaxScrollOffset(SliverConstraints constraints, {
+  double estimateMaxScrollOffset(
+    SliverConstraints constraints, {
     int firstIndex,
     int lastIndex,
     double leadingScrollOffset,
@@ -1158,9 +1341,9 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
 
   @override
   void moveChildRenderObject(covariant RenderObject child, int slot) {
-    // TODO(ianh): At some point we should be better about noticing when a
-    // particular LocalKey changes slot, and handle moving the nodes around.
-    assert(false);
+    assert(slot != null);
+    assert(_currentlyUpdatingChildIndex == slot);
+    renderObject.move(child, after: _currentBeforeChild);
   }
 
   @override
@@ -1171,9 +1354,9 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
 
   @override
   void visitChildren(ElementVisitor visitor) {
-   // The toList() is to make a copy so that the underlying list can be modified by
-   // the visitor:
-   assert(!_childElements.values.any((Element child) => child == null));
+    // The toList() is to make a copy so that the underlying list can be modified by
+    // the visitor:
+    assert(!_childElements.values.any((Element child) => child == null));
     _childElements.values.toList().forEach(visitor);
   }
 
@@ -1200,11 +1383,218 @@ class SliverMultiBoxAdaptorElement extends RenderObjectElement implements Render
 /// A sliver that contains a single box child that fills the remaining space in
 /// the viewport.
 ///
-/// [SliverFillRemaining] sizes its child to fill the viewport in the cross axis
-/// and to fill the remaining space in the viewport in the main axis.
+/// [SliverFillRemaining] will size its [child] to fill the viewport in the
+/// cross axis. The extent of the sliver and its child's size in the main axis
+/// is computed conditionally, described in further detail below.
 ///
 /// Typically this will be the last sliver in a viewport, since (by definition)
 /// there is never any room for anything beyond this sliver.
+///
+/// ## Main Axis Extent
+///
+/// ### When [SliverFillRemaining] has a scrollable child
+///
+/// The [hasScrollBody] flag indicates whether the sliver's child has a
+/// scrollable body. This value is never null, and defaults to true. A common
+/// example of this use is a [NestedScrollView]. In this case, the sliver will
+/// size its child to fill the maximum available extent.
+///
+/// ### When [SliverFillRemaining] does not have a scrollable child
+///
+/// When [hasScrollBody] is set to false, the child's size is taken into account
+/// when considering the extent to which it should fill the space. The
+/// [precedingScrollExtent] of the [SliverConstraints] is also taken into
+/// account in deciding how to layout the sliver.
+///
+///   * [SliverFillRemaining] will size its [child] to fill the viewport in the
+///     main axis if that space is larger than the child's extent, and the
+///     [precedingScrollExtent] has not exceeded the main axis extent of the
+///     viewport.
+///
+/// {@animation 250 500 https://flutter.github.io/assets-for-api-docs/assets/widgets/sliver_fill_remaining_sizes_child.mp4}
+///
+/// {@tool snippet --template=stateless_widget_scaffold}
+///
+/// In this sample the [SliverFillRemaining] sizes its [child] to fill the
+/// remaining extent of the viewport in both axes. The icon is centered in the
+/// sliver, and would be in any computed extent for the sliver.
+///
+/// ```dart
+/// Widget build(BuildContext context) {
+///   return CustomScrollView(
+///     slivers: <Widget>[
+///       SliverToBoxAdapter(
+///         child: Container(
+///           color: Colors.amber[300],
+///           height: 150.0,
+///         ),
+///       ),
+///       SliverFillRemaining(
+///         hasScrollBody: false,
+///         child: Container(
+///           color: Colors.blue[100],
+///           child: Icon(
+///             Icons.sentiment_very_satisfied,
+///             size: 75,
+///             color: Colors.blue[900],
+///           ),
+///         ),
+///       ),
+///     ],
+///   );
+/// }
+/// ```
+/// {@end-tool}
+///
+///  * [SliverFillRemaining] will defer to the size of its [child] if the
+///    child's size exceeds the remaining space in the viewport.
+///
+/// {@animation 250 500 https://flutter.github.io/assets-for-api-docs/assets/widgets/sliver_fill_remaining_defers_to_child.mp4}
+///
+/// {@tool snippet --template=stateless_widget_scaffold}
+///
+/// In this sample the [SliverFillRemaining] defers to the size of its [child]
+/// because the child's extent exceeds that of the remaining extent of the
+/// viewport's main axis.
+///
+/// ```dart
+/// Widget build(BuildContext context) {
+///   return CustomScrollView(
+///     slivers: <Widget>[
+///       SliverFixedExtentList(
+///         itemExtent: 100.0,
+///         delegate: SliverChildBuilderDelegate(
+///           (BuildContext context, int index) {
+///             return Container(
+///               color: index % 2 == 0
+///                 ? Colors.amber[200]
+///                 : Colors.blue[200],
+///             );
+///           },
+///           childCount: 3,
+///         ),
+///       ),
+///       SliverFillRemaining(
+///         hasScrollBody: false,
+///         child: Container(
+///           color: Colors.orange[300],
+///           child: Padding(
+///             padding: const EdgeInsets.all(50.0),
+///             child: FlutterLogo(size: 100),
+///           ),
+///         ),
+///       ),
+///     ],
+///   );
+/// }
+/// ```
+/// {@end-tool}
+///
+/// * [SliverFillRemaining] will defer to the size of its [child] if the
+///   [precedingScrollExtent] exceeded the length of the viewport's main axis.
+///
+/// {@animation 250 500 https://flutter.github.io/assets-for-api-docs/assets/widgets/sliver_fill_remaining_scrolled_beyond.mp4}
+///
+/// {@tool snippet --template=stateless_widget_scaffold}
+///
+/// In this sample the [SliverFillRemaining] defers to the size of its [child]
+/// because the [precedingScrollExtent] of the [SliverConstraints] has gone
+/// beyond that of the viewport's main axis.
+///
+/// ```dart
+/// Widget build(BuildContext context) {
+///   return CustomScrollView(
+///     slivers: <Widget>[
+///       SliverFixedExtentList(
+///         itemExtent: 130.0,
+///         delegate: SliverChildBuilderDelegate(
+///           (BuildContext context, int index) {
+///             return Container(
+///               color: index % 2 == 0
+///                 ? Colors.indigo[200]
+///                 : Colors.orange[200],
+///             );
+///           },
+///           childCount: 5,
+///         ),
+///       ),
+///       SliverFillRemaining(
+///         hasScrollBody: false,
+///         child: Container(
+///           child: Padding(
+///             padding: const EdgeInsets.all(50.0),
+///             child: Icon(
+///               Icons.pan_tool,
+///               size: 60,
+///               color: Colors.blueGrey,
+///             ),
+///           ),
+///         ),
+///       ),
+///     ],
+///   );
+/// }
+/// ```
+/// {@end-tool}
+///
+/// * For [ScrollPhysics] that allow overscroll, such as
+///   [BouncingScrollPhysics], setting the [fillOverscroll] flag to true allows
+///   the size of the [child] to _stretch_, filling the overscroll area. It does
+///   this regardless of the path chosen to provide the child's size.
+///
+/// {@animation 250 500 https://flutter.github.io/assets-for-api-docs/assets/widgets/sliver_fill_remaining_fill_overscroll.mp4}
+///
+/// {@tool snippet --template=stateless_widget_scaffold}
+///
+/// In this sample the [SliverFillRemaining]'s child stretches to fill the
+/// overscroll area when [fillOverscroll] is true. This sample also features a
+/// button that is pinned to the bottom of the sliver, regardless of size or
+/// overscroll behavior. Try switching [fillOverscroll] to see the difference.
+///
+/// ```dart
+/// Widget build(BuildContext context) {
+///   return CustomScrollView(
+///     // The ScrollPhysics are overridden here to illustrate the functionality
+///     // of fillOverscroll on all devices this sample may be run on.
+///     // fillOverscroll only changes the behavior of your layout when applied
+///     // to Scrollables that allow for overscroll. BouncingScrollPhysics are
+///     // one example, which are provided by default on the iOS platform.
+///     physics: BouncingScrollPhysics(),
+///     slivers: <Widget>[
+///       SliverToBoxAdapter(
+///         child: Container(
+///           color: Colors.tealAccent[700],
+///           height: 150.0,
+///         ),
+///       ),
+///       SliverFillRemaining(
+///         hasScrollBody: false,
+///         // Switch for different overscroll behavior in your layout.
+///         // If your ScrollPhysics do not allow for overscroll, setting
+///         // fillOverscroll to true will have no effect.
+///         fillOverscroll: true,
+///         child: Container(
+///           color: Colors.teal[100],
+///           child: Align(
+///             alignment: Alignment.bottomCenter,
+///             child: Padding(
+///               padding: const EdgeInsets.all(16.0),
+///               child: RaisedButton(
+///                 onPressed: () {
+///                   /* Place your onPressed code here! */
+///                 },
+///                 child: Text('Bottom Pinned Button!'),
+///               ),
+///             ),
+///           ),
+///         ),
+///       ),
+///     ],
+///   );
+/// }
+/// ```
+/// {@end-tool}
+///
 ///
 /// See also:
 ///
@@ -1217,10 +1607,46 @@ class SliverFillRemaining extends SingleChildRenderObjectWidget {
   const SliverFillRemaining({
     Key key,
     Widget child,
-  }) : super(key: key, child: child);
+    this.hasScrollBody = true,
+    this.fillOverscroll = false,
+  }) : assert(hasScrollBody != null),
+       super(key: key, child: child);
+
+  /// Indicates whether the child has a scrollable body, this value cannot be
+  /// null.
+  ///
+  /// Defaults to true such that the child will extend beyond the viewport and
+  /// scroll, as seen in [NestedScrollView].
+  ///
+  /// Setting this value to false will allow the child to fill the remainder of
+  /// the viewport and not extend further. However, if the
+  /// [precedingScrollExtent] of the [SliverContraints] and/or the [child]'s
+  /// extent exceeds the size of the viewport, the sliver will defer to the
+  /// child's size rather than overriding it.
+  final bool hasScrollBody;
+
+  /// Indicates whether the child should stretch to fill the overscroll area
+  /// created by certain scroll physics, such as iOS' default scroll physics.
+  /// This value cannot be null. This flag is only relevant when the
+  /// [hasScrollBody] value is false.
+  ///
+  /// Defaults to false, meaning the default behavior is for the child to
+  /// maintain its size and not extend into the overscroll area.
+  final bool fillOverscroll;
 
   @override
-  RenderSliverFillRemaining createRenderObject(BuildContext context) => RenderSliverFillRemaining();
+  RenderSliverFillRemaining createRenderObject(BuildContext context) {
+    return RenderSliverFillRemaining(
+      hasScrollBody: hasScrollBody,
+      fillOverscroll: fillOverscroll,
+    );
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, RenderSliverFillRemaining renderObject) {
+    renderObject.hasScrollBody = hasScrollBody;
+    renderObject.fillOverscroll = fillOverscroll;
+  }
 }
 
 /// Mark a child as needing to stay alive even when it's in a lazy list that
@@ -1286,14 +1712,13 @@ class KeepAlive extends ParentDataWidget<SliverWithKeepAliveWidget> {
   }
 }
 
-// Return an ErrorWidget for the given Exception
-ErrorWidget _createErrorWidget(dynamic exception, StackTrace stackTrace) {
+// Return a Widget for the given Exception
+Widget _createErrorWidget(dynamic exception, StackTrace stackTrace) {
   final FlutterErrorDetails details = FlutterErrorDetails(
     exception: exception,
     stack: stackTrace,
     library: 'widgets library',
-    context: 'building',
-    informationCollector: null,
+    context: ErrorDescription('building'),
   );
   FlutterError.reportError(details);
   return ErrorWidget.builder(details);

@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 
 import 'system_channels.dart';
 
+export 'dart:ui' show Brightness;
+
 /// Specifies a particular device orientation.
 ///
 /// To determine which values correspond to which orientations, first position
@@ -76,21 +78,6 @@ enum SystemUiOverlay {
   /// The status bar provided by the embedder on the bottom of the application
   /// surface, if any.
   bottom,
-}
-
-/// Describes the contrast needs of a color.
-enum Brightness {
-  /// The color is dark and will require a light text color to achieve readable
-  /// contrast.
-  ///
-  /// For example, the color might be dark grey, requiring white text.
-  dark,
-
-  /// The color is light and will require a dark text color to achieve readable
-  /// contrast.
-  ///
-  /// For example, the color might be bright white, requiring black text.
-  light,
 }
 
 /// Specifies a preference for the style of the system overlays.
@@ -219,12 +206,9 @@ class SystemUiOverlayStyle {
   }
 }
 
-List<String> _stringify(List<dynamic> list) {
-  final List<String> result = <String>[];
-  for (dynamic item in list)
-    result.add(item.toString());
-  return result;
-}
+List<String> _stringify(List<dynamic> list) => <String>[
+  for (dynamic item in list) item.toString(),
+];
 
 /// Controls specific aspects of the operating system's graphical interface and
 /// how it interacts with the application.
@@ -237,6 +221,17 @@ class SystemChrome {
   /// The `orientation` argument is a list of [DeviceOrientation] enum values.
   /// The empty list causes the application to defer to the operating system
   /// default.
+  ///
+  /// ## Limitations
+  ///
+  /// This setting will only be respected on iPad if multitasking is disabled.
+  ///
+  /// You can decide to opt out of multitasking on iPad, then
+  /// setPreferredOrientations will work but your app will not
+  /// support Slide Over and Split View multitasking anymore.
+  ///
+  /// Should you decide to opt out of multitasking you can do this by
+  /// setting "Requires full screen" to true in the Xcode Deployment Info.
   static Future<void> setPreferredOrientations(List<DeviceOrientation> orientations) async {
     await SystemChannels.platform.invokeMethod<void>(
       'SystemChrome.setPreferredOrientations',
@@ -268,7 +263,7 @@ class SystemChrome {
   /// If a particular overlay is unsupported on the platform, enabling or
   /// disabling that overlay will be ignored.
   ///
-  /// The settings here can be overidden by the platform when System UI becomes
+  /// The settings here can be overridden by the platform when System UI becomes
   /// necessary for functionality.
   ///
   /// For example, on Android, when the keyboard becomes visible, it will enable the
@@ -324,15 +319,15 @@ class SystemChrome {
   /// If a particular style is not supported on the platform, selecting it will
   /// have no effect.
   ///
-  /// ## Sample Code
-  ///
+  /// {@tool sample}
   /// ```dart
   /// @override
   /// Widget build(BuildContext context) {
   ///   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-  ///   return /* ... */;
+  ///   return Placeholder();
   /// }
   /// ```
+  /// {@end-tool}
   ///
   /// For more complex control of the system overlay styles, consider using
   /// an [AnnotatedRegion] widget instead of calling [setSystemUiOverlayStyle]
@@ -342,47 +337,46 @@ class SystemChrome {
   /// navigation bar and synthesize them into a single style. This can be used
   /// to configure the system styles when an app bar is not used.
   ///
-  /// {@tool snippet --template=stateful_widget}
+  /// {@tool snippet --template=stateful_widget_material}
   /// The following example creates a widget that changes the status bar color
   /// to a random value on Android.
   ///
   /// ```dart imports
-  ///    import 'package:flutter/services.dart';
-  ///    import 'dart:math' as math;
+  /// import 'package:flutter/services.dart';
+  /// import 'dart:math' as math;
   /// ```
   ///
   /// ```dart
-  ///    final _random = math.Random();
-  ///    SystemUiOverlayStyle _currentStyle = SystemUiOverlayStyle.light;
+  /// final _random = math.Random();
+  /// SystemUiOverlayStyle _currentStyle = SystemUiOverlayStyle.light;
   ///
-  ///    void _changeColor() {
-  ///      final color = Color.fromRGBO(
-  ///        _random.nextInt(255),
-  ///        _random.nextInt(255),
-  ///        _random.nextInt(255),
-  ///        1.0,
-  ///      );
-  ///      setState(() {
-  ///        _currentStyle = SystemUiOverlayStyle.dark.copyWith(
-  ///          statusBarColor: color,
-  ///        );
-  ///      });
-  ///    }
+  /// void _changeColor() {
+  ///   final color = Color.fromRGBO(
+  ///     _random.nextInt(255),
+  ///     _random.nextInt(255),
+  ///     _random.nextInt(255),
+  ///     1.0,
+  ///   );
+  ///   setState(() {
+  ///     _currentStyle = SystemUiOverlayStyle.dark.copyWith(
+  ///       statusBarColor: color,
+  ///     );
+  ///   });
+  /// }
   ///
-  ///    @override
-  ///    Widget build(BuildContext context) {
-  ///      return Scaffold(
-  ///        body: AnnotatedRegion(
-  ///          value: _currentStyle,
-  ///           child: Center(
-  ///             child: RaisedButton(
-  ///               child: const Text('Change Color'),
-  ///               onPressed: _changeColor,
-  ///             ),
-  ///           ),
-  ///         ),
-  ///       );
-  ///     }
+  /// @override
+  /// Widget build(BuildContext context) {
+  ///   return AnnotatedRegion(
+  ///     value: _currentStyle,
+  ///     child: Center(
+  ///       child: RaisedButton(
+  ///         child: const Text('Change Color'),
+  ///         onPressed: _changeColor,
+  ///        ),
+  ///      ),
+  ///    );
+  ///  }
+  /// ```
   /// {@end-tool}
   ///
   /// See also:
